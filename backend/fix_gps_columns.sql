@@ -1,0 +1,3 @@
+ALTER TABLE devices ADD COLUMN latitude DECIMAL(10, 8);
+ALTER TABLE devices ADD COLUMN longitude DECIMAL(11, 8);
+ALTER TABLE devices ADD COLUMN location_name VARCHAR(100);
