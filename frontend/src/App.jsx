@@ -13,13 +13,15 @@ export default function App() {
   const [demoMode, setDemoMode] = useState(false);
   const [selectedCard, setSelectedCard] = useState(null);
   const [showMap, setShowMap] = useState(true);
-  const [viewMode, setViewMode] = useState("single"); // "single" or "all"
+  const [viewMode, setViewMode] = useState("single");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [showAddDeviceModal, setShowAddDeviceModal] = useState(false);
+  const [newDeviceData, setNewDeviceData] = useState({ latitude: "", longitude: "", location_name: "" });
+  const [addingDevice, setAddingDevice] = useState(false);
 
   console.log("App rendering - devices:", devices.length, "selectedDeviceId:", selectedDeviceId);
-
-  /* Don't clear history on device switch - keep accumulating */
-  // History is now stored per-device in deviceHistory state
+  console.log("App state - backendOnline:", backendOnline, "loading:", loading, "error:", error);
 
   /* Backend health check */
   useEffect(() => {
@@ -32,8 +34,13 @@ export default function App() {
       }
     };
     check();
+    // Force loading to false after 5 seconds to prevent infinite loading
+    const timeout = setTimeout(() => setLoading(false), 5000);
     const i = setInterval(check, 3000);
-    return () => clearInterval(i);
+    return () => {
+      clearInterval(i);
+      clearTimeout(timeout);
+    };
   }, []);
 
   /* Load devices */
@@ -42,7 +49,10 @@ export default function App() {
 
     setLoading(true);
     fetch("http://localhost:5000/api/devices")
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) throw new Error("Failed to fetch devices");
+        return r.json();
+      })
       .then(d => {
         console.log("Devices loaded:", d);
         setDevices(d);
@@ -50,18 +60,19 @@ export default function App() {
           setSelectedDeviceId(d[0].id);
         }
         setLoading(false);
+        setError(null);
       })
       .catch(err => {
         console.error("Failed to load devices:", err);
         setLoading(false);
+        setError("Could not connect to backend. Make sure the server is running.");
       });
   }, [backendOnline]);
 
-  /* Fetch ALL device data continuously - doesn't restart on device switch */
+  /* Fetch ALL device data continuously */
   useEffect(() => {
     if (!backendOnline || demoMode || devices.length === 0) return;
 
-    // Use ref to store interval ID so it doesn't restart
     const intervalRef = { current: null };
     
     const fetchAllDeviceData = async () => {
@@ -70,10 +81,8 @@ export default function App() {
         const data = await r.json();
         console.log("All device data fetched:", data);
         
-        // Update all device data
         setAllDeviceData(data);
         
-        // Also update history for each device that has data
         Object.values(data).forEach(deviceData => {
           if (deviceData.status === 'online' && deviceData.soil !== undefined) {
             setDeviceHistory(prev => {
@@ -83,7 +92,6 @@ export default function App() {
                 time: new Date().toLocaleTimeString(),
                 created_at: deviceData.last_update || new Date()
               };
-              // Keep last 50 entries, newest at the TOP
               return {
                 ...prev,
                 [deviceData.id]: [newEntry, ...deviceHist.slice(0, 49)]
@@ -94,7 +102,6 @@ export default function App() {
       } catch (err) {
         console.error("Failed to fetch all device data:", err);
         
-        // Fallback: fetch each device individually
         const deviceDataMap = {};
         const promises = devices.map(async (device) => {
           try {
@@ -116,7 +123,6 @@ export default function App() {
             };
             deviceDataMap[deviceId] = entry;
             
-            // Update history for this device - newest at top
             setDeviceHistory(prev => {
               const deviceHist = prev[deviceId] || [];
               return {
@@ -130,10 +136,7 @@ export default function App() {
       }
     };
 
-    // Initial fetch
     fetchAllDeviceData();
-    
-    // Set up interval - this won't restart on device switch
     intervalRef.current = setInterval(fetchAllDeviceData, 3000);
     
     return () => {
@@ -141,7 +144,7 @@ export default function App() {
     };
   }, [backendOnline, demoMode, devices.length]);
 
-  /* Demo Mode - Generate random data for all devices continuously */
+  /* Demo Mode - Generate random data */
   useEffect(() => {
     if (!demoMode || devices.length === 0) return;
 
@@ -176,7 +179,6 @@ export default function App() {
         
         newData[device.id] = newEntry;
         
-        // Update history for this device - newest at top
         setDeviceHistory(prev => {
           const deviceHist = prev[device.id] || [];
           return {
@@ -208,6 +210,38 @@ export default function App() {
     setSelectedDeviceId(deviceId);
   };
 
+  const handleAddDevice = async () => {
+    setAddingDevice(true);
+    try {
+      const response = await fetch("http://localhost:5000/api/devices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          latitude: newDeviceData.latitude ? parseFloat(newDeviceData.latitude) : null,
+          longitude: newDeviceData.longitude ? parseFloat(newDeviceData.longitude) : null,
+          location_name: newDeviceData.location_name || null
+        })
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log("Device added:", result);
+        
+        const devicesResponse = await fetch("http://localhost:5000/api/devices");
+        const devicesData = await devicesResponse.json();
+        setDevices(devicesData);
+        
+        setSelectedDeviceId(result.id);
+        
+        setShowAddDeviceModal(false);
+        setNewDeviceData({ latitude: "", longitude: "", location_name: "" });
+      }
+    } catch (error) {
+      console.error("Error adding device:", error);
+    }
+    setAddingDevice(false);
+  };
+
   const getCardInfo = (title) => {
     const info = {
       "Soil": {
@@ -234,19 +268,52 @@ export default function App() {
     return info[title] || {};
   };
 
-  // Get current device data
   const currentData = allDeviceData[selectedDeviceId] || null;
-  
-  // Get history for selected device
   const history = deviceHistory[selectedDeviceId] || [];
+  const [fullHistory, setFullHistory] = useState([]);
 
-  // Get online devices count
+  useEffect(() => {
+    if (!selectedDeviceId) return;
+    fetch(`http://localhost:5000/api/history/${selectedDeviceId}`)
+      .then(r => r.json())
+      .then(data => {
+        // the server returns oldest first
+        setFullHistory(data || []);
+      })
+      .catch(err => console.error('Failed to load full history', err));
+  }, [selectedDeviceId]);
   const onlineDevices = Object.values(allDeviceData).filter(d => d.status === 'online').length;
 
   if (loading) {
     return (
       <div className="page">
-        <div className="loading">Loading...</div>
+        <div className="loading">
+          <h2>Loading Dashboard...</h2>
+          <p>Connecting to backend on http://localhost:5000</p>
+          <p style={{marginTop: "20px", fontSize: "12px", color: "#94a3b8"}}>Backend Online: {backendOnline ? "Yes" : "No"}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="page">
+        <div className="error-container">
+          <h2>Connection Error</h2>
+          <p>{error}</p>
+          <div className="error-steps">
+            <p><strong>To fix this:</strong></p>
+            <ol>
+              <li>Make sure MySQL is running</li>
+              <li>Start the backend: <code>cd backend && npm start</code></li>
+              <li>Refresh this page</li>
+            </ol>
+          </div>
+          <button className="demo-btn" onClick={() => { setError(null); setDemoMode(true); }}>
+            Try Demo Mode Anyway
+          </button>
+        </div>
       </div>
     );
   }
@@ -255,59 +322,77 @@ export default function App() {
     <div className="page">
       <header>
         <div className="header-left">
-          <h1>🌱 LoRa Soil Monitoring</h1>
+          <h1>LoRa Soil Monitoring</h1>
           <div className="status-badges">
-            <span className="device-count">
-              📡 {devices.length} Devices
-            </span>
-            <span className="online-count">
-              🟢 {onlineDevices} Online
-            </span>
+            <span className="device-count">{devices.length} Devices</span>
+            <span className="online-count">{onlineDevices} Online</span>
           </div>
         </div>
         <div className="header-right">
+          <button className="add-device-btn" onClick={() => setShowAddDeviceModal(true)}>
+            Add Device
+          </button>
           <div className="view-toggle">
-            <button 
-              className={`view-btn ${viewMode === "single" ? "active" : ""}`}
-              onClick={() => setViewMode("single")}
-            >
+            <button className={`view-btn ${viewMode === "single" ? "active" : ""}`} onClick={() => setViewMode("single")}>
               Single
             </button>
-            <button 
-              className={`view-btn ${viewMode === "all" ? "active" : ""}`}
-              onClick={() => setViewMode("all")}
-            >
+            <button className={`view-btn ${viewMode === "all" ? "active" : ""}`} onClick={() => setViewMode("all")}>
               All Devices
             </button>
           </div>
-          <button 
-            className={`demo-btn ${demoMode ? "active" : ""}`}
-            onClick={() => setDemoMode(!demoMode)}
-          >
-            {demoMode ? "⏹ Demo" : "▶ Demo"}
+          <button className={`demo-btn ${demoMode ? "active" : ""}`} onClick={() => setDemoMode(!demoMode)}>
+            {demoMode ? "Stop Demo" : "Start Demo"}
           </button>
-          <button 
-            className={`demo-btn ${showMap ? "active" : ""}`}
-            onClick={() => setShowMap(!showMap)}
-          >
-            {showMap ? "🗺️" : "📍"}
+          <button className={`demo-btn ${showMap ? "active" : ""}`} onClick={() => setShowMap(!showMap)}>
+            {showMap ? "Hide Map" : "Show Map"}
           </button>
           <span className={backendOnline ? "online" : "offline"}>
-            ● {backendOnline ? "ONLINE" : "OFFLINE"}
+            {backendOnline ? "ONLINE" : "OFFLINE"}
           </span>
         </div>
       </header>
 
-      {/* GPS Map */}
-      {showMap && (
-        <GPSMap 
-          devices={devices} 
-          onDeviceClick={handleDeviceClick}
-          selectedDevice={selectedDeviceId}
-        />
+      {showAddDeviceModal && (
+        <div className="modal-overlay" onClick={() => setShowAddDeviceModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Add New Device</h2>
+              <button className="modal-close" onClick={() => setShowAddDeviceModal(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <p className="modal-info">
+                A new device will be created: <strong>Device {devices.length + 1}</strong>
+              </p>
+              <div className="form-group">
+                <label>Location Name (Optional)</label>
+                <input type="text" placeholder="e.g., Garden, Farm" value={newDeviceData.location_name}
+                  onChange={(e) => setNewDeviceData({...newDeviceData, location_name: e.target.value})} />
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Latitude</label>
+                  <input type="number" step="any" placeholder="13.0823" value={newDeviceData.latitude}
+                    onChange={(e) => setNewDeviceData({...newDeviceData, latitude: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label>Longitude</label>
+                  <input type="number" step="any" placeholder="80.2707" value={newDeviceData.longitude}
+                    onChange={(e) => setNewDeviceData({...newDeviceData, longitude: e.target.value})} />
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-cancel" onClick={() => setShowAddDeviceModal(false)}>Cancel</button>
+              <button className="btn-add" onClick={handleAddDevice} disabled={addingDevice}>
+                {addingDevice ? "Adding..." : "Add Device"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
-      {/* Device Selector */}
+      {showMap && <GPSMap devices={devices} onDeviceClick={handleDeviceClick} selectedDevice={selectedDeviceId} />}
+
       {backendOnline && devices.length > 0 && (
         <div className="device-selector">
           <label className="device-label">Active Device:</label>
@@ -321,56 +406,30 @@ export default function App() {
         </div>
       )}
 
-      {/* ALL DEVICES VIEW - Shows cards for all devices */}
       {viewMode === "all" && (
         <div className="all-devices-grid">
           {devices.map(device => {
             const data = allDeviceData[device.id];
             const isOnline = data?.status === 'online';
-            
             return (
-              <div 
-                key={device.id} 
-                className={`device-card ${selectedDeviceId === device.id ? 'selected' : ''}`}
-                onClick={() => setSelectedDeviceId(device.id)}
-              >
+              <div key={device.id} className={`device-card ${selectedDeviceId === device.id ? 'selected' : ''}`}
+                onClick={() => setSelectedDeviceId(device.id)}>
                 <div className="device-card-header">
                   <h4>{device.name || device.id}</h4>
-                  <span className={isOnline ? "online" : "offline"}>
-                    {isOnline ? "🟢" : "🔴"}
-                  </span>
+                  <span className={isOnline ? "online" : "offline"} style={{fontSize: '16px'}}>{isOnline ? "●" : "●"}</span>
                 </div>
                 {data && isOnline ? (
                   <div className="device-card-stats">
-                    <div className="stat">
-                      <span className="label">Soil</span>
-                      <span className="value">{data.soil}</span>
-                    </div>
-                    <div className="stat">
-                      <span className="label">Temp</span>
-                      <span className="value">{data.temperature}°C</span>
-                    </div>
-                    <div className="stat">
-                      <span className="label">Hum</span>
-                      <span className="value">{data.humidity}%</span>
-                    </div>
-                    <div className="stat">
-                      <span className="label">RSSI</span>
-                      <span className="value">{data.rssi}</span>
-                    </div>
+                    <div className="stat"><span className="label">Soil</span><span className="value">{data.soil}</span></div>
+                    <div className="stat"><span className="label">Temp</span><span className="value">{data.temperature}°C</span></div>
+                    <div className="stat"><span className="label">Hum</span><span className="value">{data.humidity}%</span></div>
+                    <div className="stat"><span className="label">RSSI</span><span className="value">{data.rssi}</span></div>
                   </div>
                 ) : (
                   <div className="no-data">No data received</div>
                 )}
-                <button 
-                  className="view-device-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedDeviceId(device.id);
-                    setViewMode("single");
-                  }}
-                >
-                  View Details →
+                <button className="view-device-btn" onClick={(e) => { e.stopPropagation(); setSelectedDeviceId(device.id); setViewMode("single"); }}>
+                  View Details
                 </button>
               </div>
             );
@@ -378,42 +437,13 @@ export default function App() {
         </div>
       )}
 
-      {/* SINGLE DEVICE VIEW - Original cards */}
       {viewMode === "single" && (
         <>
           <div className="grid">
-            <StatCard 
-              title="Soil" 
-              value={currentData?.soil} 
-              unit="ADC" 
-              onClick={() => setSelectedCard(selectedCard === "Soil" ? null : "Soil")}
-              isSelected={selectedCard === "Soil"}
-              info={getCardInfo("Soil")}
-            />
-            <StatCard 
-              title="Temp" 
-              value={currentData?.temperature} 
-              unit="°C" 
-              onClick={() => setSelectedCard(selectedCard === "Temp" ? null : "Temp")}
-              isSelected={selectedCard === "Temp"}
-              info={getCardInfo("Temp")}
-            />
-            <StatCard 
-              title="Humidity" 
-              value={currentData?.humidity} 
-              unit="%" 
-              onClick={() => setSelectedCard(selectedCard === "Humidity" ? null : "Humidity")}
-              isSelected={selectedCard === "Humidity"}
-              info={getCardInfo("Humidity")}
-            />
-            <StatCard 
-              title="RSSI" 
-              value={currentData?.rssi} 
-              unit="dBm" 
-              onClick={() => setSelectedCard(selectedCard === "RSSI" ? null : "RSSI")}
-              isSelected={selectedCard === "RSSI"}
-              info={getCardInfo("RSSI")}
-            />
+            <StatCard title="Soil" value={currentData?.soil} unit="ADC" onClick={() => setSelectedCard(selectedCard === "Soil" ? null : "Soil")} isSelected={selectedCard === "Soil"} info={getCardInfo("Soil")} />
+            <StatCard title="Temp" value={currentData?.temperature} unit="°C" onClick={() => setSelectedCard(selectedCard === "Temp" ? null : "Temp")} isSelected={selectedCard === "Temp"} info={getCardInfo("Temp")} />
+            <StatCard title="Humidity" value={currentData?.humidity} unit="%" onClick={() => setSelectedCard(selectedCard === "Humidity" ? null : "Humidity")} isSelected={selectedCard === "Humidity"} info={getCardInfo("Humidity")} />
+            <StatCard title="RSSI" value={currentData?.rssi} unit="dBm" onClick={() => setSelectedCard(selectedCard === "RSSI" ? null : "RSSI")} isSelected={selectedCard === "RSSI"} info={getCardInfo("RSSI")} />
           </div>
 
           {selectedCard && (
@@ -421,7 +451,7 @@ export default function App() {
               <h3>{selectedCard} Details</h3>
               <p><strong>Description:</strong> {getCardInfo(selectedCard).description}</p>
               <p><strong>Range:</strong> {getCardInfo(selectedCard).range}</p>
-              <p><strong>💡 Tip:</strong> {getCardInfo(selectedCard).tips}</p>
+              <p><strong>Tip:</strong> {getCardInfo(selectedCard).tips}</p>
             </div>
           )}
 
@@ -431,7 +461,8 @@ export default function App() {
             <SensorChart title="Humidity" data={history} dataKey="humidity" color="#38bdf8" unit="%" />
           </div>
 
-          <DataTable data={history} />
+          {/* show full history if loaded, otherwise recent readings */}
+          <DataTable data={fullHistory.length > 0 ? fullHistory : history} showFull={fullHistory.length > 0} />
         </>
       )}
     </div>

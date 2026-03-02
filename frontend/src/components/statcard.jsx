@@ -7,7 +7,7 @@ export default function StatCard({ title, value, unit, onClick, isSelected, info
     >
       <div className="card-header">
         <h4>{title}</h4>
-        <span className="info-icon">ℹ️</span>
+        <span className="info-icon">Info</span>
       </div>
       <p className="value">
         {value ?? "--"} <span>{unit}</span>
@@ -17,7 +17,7 @@ export default function StatCard({ title, value, unit, onClick, isSelected, info
           <p className="tooltip-title">{title} Information</p>
           <p><strong>Description:</strong> {info.description}</p>
           <p><strong>Range:</strong> {info.range}</p>
-          <p className="tooltip-tip">💡 {info.tips}</p>
+          <p className="tooltip-tip">Tip: {info.tips}</p>
         </div>
       )}
     </div>

@@ -21,11 +21,11 @@ CREATE TABLE devices (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Insert sample devices
-INSERT INTO devices (id, name, status) VALUES 
-('NODE_01', 'Node 1', 'offline'),
-('NODE_02', 'Node 2', 'offline'),
-('NODE_03', 'Node 3', 'offline');
+-- Insert sample devices with GPS coordinates
+INSERT INTO devices (id, name, status, latitude, longitude, location_name) VALUES 
+('NODE_01', 'Device 1', 'online', 14.4324, 75.9566, 'Main Location'),
+('NODE_02', 'Device 2', 'offline', 14.4330, 75.9570, 'Secondary Location'),
+('NODE_03', 'Device 3', 'offline', 14.4318, 75.9562, 'Tertiary Location');
 
 -- =============================================
 -- Sensor Data Table

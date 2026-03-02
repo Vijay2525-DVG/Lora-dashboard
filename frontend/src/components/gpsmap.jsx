@@ -1,10 +1,18 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 
 export default function GPSMap({ devices, onDeviceClick, selectedDevice }) {
   const [deviceLocations, setDeviceLocations] = useState({});
   const [editingDevice, setEditingDevice] = useState(null);
   const [formData, setFormData] = useState({ latitude: "", longitude: "", location_name: "" });
-  const canvasRef = useRef(null);
+  const [pickMode, setPickMode] = useState(false); // when true, next map click sets coordinates
+
+  const validLocations = useMemo(() => {
+    return Object.entries(deviceLocations)
+      .filter(([, loc]) => loc.latitude && loc.longitude)
+      .map(([id, loc]) => ({ id, ...loc }));
+  }, [deviceLocations]);
 
   // Load device locations from API
   useEffect(() => {
@@ -14,8 +22,8 @@ export default function GPSMap({ devices, onDeviceClick, selectedDevice }) {
         const locs = {};
         data.forEach(d => {
           locs[d.id] = {
-            latitude: d.latitude,
-            longitude: d.longitude,
+            latitude: d.latitude !== null ? parseFloat(d.latitude) : null,
+            longitude: d.longitude !== null ? parseFloat(d.longitude) : null,
             location_name: d.location_name,
             status: d.status
           };
@@ -28,8 +36,8 @@ export default function GPSMap({ devices, onDeviceClick, selectedDevice }) {
   // Generate demo positions if no GPS data
   useEffect(() => {
     if (devices.length > 0 && Object.keys(deviceLocations).length === 0) {
-      const baseLat = 13.0823;
-      const baseLng = 80.2707;
+      const baseLat = 14.4324;
+      const baseLng = 75.9566;
       const newLocs = {};
       
       devices.forEach((device, index) => {
@@ -47,130 +55,107 @@ export default function GPSMap({ devices, onDeviceClick, selectedDevice }) {
     }
   }, [devices]);
 
-  // Draw map on canvas
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    const width = canvas.width;
-    const height = canvas.height;
-    
-    // Clear canvas
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(0, 0, width, height);
-    
-    // Draw grid lines
-    ctx.strokeStyle = 'rgba(59, 130, 246, 0.1)';
-    ctx.lineWidth = 1;
-    
-    for (let i = 0; i < width; i += 40) {
-      ctx.beginPath();
-      ctx.moveTo(i, 0);
-      ctx.lineTo(i, height);
-      ctx.stroke();
-    }
-    
-    for (let i = 0; i < height; i += 40) {
-      ctx.beginPath();
-      ctx.moveTo(0, i);
-      ctx.lineTo(width, i);
-      ctx.stroke();
-    }
-    
-    // Calculate bounds for positioning
-    let minLat = Infinity, maxLat = -Infinity;
-    let minLng = Infinity, maxLng = -Infinity;
-    
-    Object.values(deviceLocations).forEach(loc => {
-      if (loc.latitude && loc.longitude) {
-        minLat = Math.min(minLat, loc.latitude);
-        maxLat = Math.max(maxLat, loc.latitude);
-        minLng = Math.min(minLng, loc.longitude);
-        maxLng = Math.max(maxLng, loc.longitude);
-      }
-    });
-    
-    const latRange = maxLat - minLat || 0.001;
-    const lngRange = maxLng - minLng || 0.001;
-    
-    // Draw device markers
-    Object.entries(deviceLocations).forEach(([deviceId, loc]) => {
-      if (!loc.latitude || !loc.longitude) return;
-      
-      const x = ((loc.longitude - minLng) / lngRange) * (width - 80) + 40;
-      const y = height - ((loc.latitude - minLat) / latRange) * (height - 80) - 40;
-      
-      const isSelected = selectedDevice === deviceId;
-      const isOnline = loc.status === 'online';
-      
-      // Draw marker circle
-      ctx.beginPath();
-      ctx.arc(x, y, isSelected ? 18 : 14, 0, Math.PI * 2);
-      ctx.fillStyle = isOnline ? '#22c55e' : '#ef4444';
-      ctx.fill();
-      
-      // Draw glow for selected
-      if (isSelected) {
-        ctx.beginPath();
-        ctx.arc(x, y, 24, 0, Math.PI * 2);
-        ctx.strokeStyle = '#60a5fa';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-      }
-      
-      // Draw inner circle
-      ctx.beginPath();
-      ctx.arc(x, y, 8, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffffff';
-      ctx.fill();
-    });
-  }, [deviceLocations, selectedDevice]);
 
-  const handleCanvasClick = (e) => {
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    // Check if clicked on existing marker
-    let minDist = Infinity;
-    let closestDevice = null;
-    
-    let minLat = Infinity, maxLat = -Infinity;
-    let minLng = Infinity, maxLng = -Infinity;
-    
-    Object.values(deviceLocations).forEach(loc => {
-      if (loc.latitude && loc.longitude) {
-        minLat = Math.min(minLat, loc.latitude);
-        maxLat = Math.max(maxLat, loc.latitude);
-        minLng = Math.min(minLng, loc.longitude);
-        maxLng = Math.max(maxLng, loc.longitude);
-      }
-    });
-    
-    const latRange = maxLat - minLat || 0.001;
-    const lngRange = maxLng - minLng || 0.001;
-    const width = canvas.width;
-    const height = canvas.height;
-    
-    Object.entries(deviceLocations).forEach(([deviceId, loc]) => {
-      if (!loc.latitude || !loc.longitude) return;
-      
-      const mx = ((loc.longitude - minLng) / lngRange) * (width - 80) + 40;
-      const my = height - ((loc.latitude - minLat) / latRange) * (height - 80) - 40;
-      
-      const dist = Math.sqrt((x - mx) ** 2 + (y - my) ** 2);
-      if (dist < 20 && dist < minDist) {
-        minDist = dist;
-        closestDevice = deviceId;
-      }
-    });
-    
-    if (closestDevice) {
-      onDeviceClick(closestDevice);
+  // initialize Leaflet map once and update markers on change
+  const mapRef = useRef(null);
+  useEffect(() => {
+    if (mapRef.current === null) {
+      // default center, we'll recenter once we have validLocations
+      const initCenter = validLocations.length > 0
+        ? [validLocations[0].latitude, validLocations[0].longitude]
+        : [0, 0];
+      mapRef.current = L.map('leaflet-map', {
+        center: initCenter,
+        zoom: 2,
+        zoom: 13,
+        scrollWheelZoom: true,       // allow wheel zoom
+        scrollWheelZoom: 'center',   // zoom toward map center
+        doubleClickZoom: true,       // re-enable double click
+        zoomControl: true,
+        dragging: true,
+        touchZoom: 'center',         // smoother touch zoom
+        inertia: true,
+        inertiaDeceleration: 3000,
+        zoomSnap: 0,                 // allow fractional zoom
+        zoomDelta: 0.25,
+        zoomAnimation: true,
+        easeLinearity: 0.25,         // smoother easing
+        attributionControl: false   // hide default attribution
+      });
+      // switch to satellite imagery tile layer (ESRI World Imagery)
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: '' // no visible attribution
+      }).addTo(mapRef.current);
     }
-  };
+
+    if (mapRef.current) {
+      if (mapRef.current._markerGroup) {
+        mapRef.current._markerGroup.clearLayers();
+      } else {
+        mapRef.current._markerGroup = L.layerGroup().addTo(mapRef.current);
+      }
+
+      validLocations.forEach(loc => {
+        const m = L.marker([loc.latitude, loc.longitude]);
+        m.bindPopup(loc.location_name || loc.id);
+        m.on('click', () => onDeviceClick(loc.id));
+        mapRef.current._markerGroup.addLayer(m);
+      });
+
+      if (validLocations.length > 0 && !mapRef.current._viewSet) {
+        mapRef.current.setView([validLocations[0].latitude, validLocations[0].longitude], 13);
+        mapRef.current._viewSet = true;
+      }
+
+      // ensure zoom behavior options remain applied
+      mapRef.current.options.scrollWheelZoom = true;
+      mapRef.current.options.zoomDelta = 0.25;
+      mapRef.current.options.easeLinearity = 0.25;
+
+      // attach click listener for coordinate picking
+      // map click handler for picking coordinates;
+      // attach/detach whenever pickMode changes so closure has fresh value
+      if (mapRef.current) {
+        const handler = (e) => {
+          console.log('map clicked', { pickMode, e });
+          if (pickMode) {
+            const { lat, lng } = e.latlng;
+            console.log('picking coordinates', lat, lng);
+            setFormData(prev => ({
+              ...prev,
+              latitude: lat.toString(),
+              longitude: lng.toString()
+            }));
+            setPickMode(false);
+          }
+        };
+        mapRef.current.on('click', handler);
+        return () => {
+          mapRef.current.off('click', handler);
+        };
+      }
+    }
+  }, [validLocations, onDeviceClick, pickMode]);
+
+  // pan map when a device is selected via props
+  useEffect(() => {
+    if (
+      mapRef.current &&
+      selectedDevice &&
+      deviceLocations[selectedDevice] &&
+      deviceLocations[selectedDevice].latitude &&
+      deviceLocations[selectedDevice].longitude
+    ) {
+      const lat = parseFloat(deviceLocations[selectedDevice].latitude);
+      const lng = parseFloat(deviceLocations[selectedDevice].longitude);
+      // zoom level when focusing a device; jump to a close view
+      let targetZoom = 18; // maximum close‑up
+      const max = mapRef.current.getMaxZoom ? mapRef.current.getMaxZoom() : targetZoom;
+      targetZoom = Math.min(targetZoom, max);
+      mapRef.current.setView([lat, lng], targetZoom, { animate: true });
+    }
+  }, [selectedDevice, deviceLocations]);
+
 
   const handleEditClick = (deviceId) => {
     const loc = deviceLocations[deviceId] || {};
@@ -219,13 +204,12 @@ export default function GPSMap({ devices, onDeviceClick, selectedDevice }) {
 
       <div className="gps-content">
         <div className="map-section">
-          <canvas
-            ref={canvasRef}
-            width={600}
-            height={400}
-            className="gps-canvas"
-            onClick={handleCanvasClick}
-          />
+          <div id="leaflet-map" style={{ height: 400, width: 600, borderRadius: '12px' }} />
+          {pickMode && (
+            <div className="map-pick-overlay">
+              <p>Click on the map to choose location</p>
+            </div>
+          )}
         </div>
 
         <div className="sensor-list-section">
@@ -248,8 +232,8 @@ export default function GPSMap({ devices, onDeviceClick, selectedDevice }) {
                   <div className="sensor-coords">
                     {loc.latitude && loc.longitude ? (
                       <>
-                        <span>{loc.latitude.toFixed(4)}</span>
-                        <span>{loc.longitude.toFixed(4)}</span>
+                        <span>{(+loc.latitude).toFixed(4)}</span>
+                        <span>{(+loc.longitude).toFixed(4)}</span>
                       </>
                     ) : (
                       <span className="no-gps">No GPS</span>
@@ -272,7 +256,7 @@ export default function GPSMap({ devices, onDeviceClick, selectedDevice }) {
       </div>
 
       {/* Edit Modal */}
-      {editingDevice && (
+      {editingDevice && !pickMode && (
         <div className="modal-overlay" onClick={() => setEditingDevice(null)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <h3>Edit GPS Location</h3>
@@ -309,6 +293,35 @@ export default function GPSMap({ devices, onDeviceClick, selectedDevice }) {
               <button className="save-btn" onClick={handleSave}>Save</button>
               <button className="cancel-btn" onClick={() => setEditingDevice(null)}>Cancel</button>
             </div>
+            <div className="map-pick-controls">
+              <button
+                className="pick-map-btn"
+                onClick={() => {
+                  setPickMode(true);
+                }}
+              >
+                📍 Pick on map
+              </button>
+              <button
+                className="use-location-btn"
+                onClick={() => {
+                  if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(pos => {
+                      setFormData(prev => ({
+                        ...prev,
+                        latitude: pos.coords.latitude.toString(),
+                        longitude: pos.coords.longitude.toString()
+                      }));
+                    });
+                  }
+                }}
+              >
+                📡 Use my location
+              </button>
+            </div>
+            {pickMode && (
+              <p className="pick-hint">Click anywhere on the map to choose coordinates</p>
+            )}
           </div>
         </div>
       )}

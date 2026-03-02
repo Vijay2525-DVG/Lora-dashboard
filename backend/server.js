@@ -49,6 +49,59 @@ app.get("/api/devices", async (req, res) => {
   }
 });
 
+/* ================= ADD NEW DEVICE ================= */
+app.post("/api/devices", async (req, res) => {
+  try {
+    // Get the current max device number
+    const [rows] = await db.query("SELECT id FROM devices WHERE id LIKE 'device_%' ORDER BY id DESC LIMIT 1");
+    
+    let newDeviceNum = 1;
+    if (rows.length > 0) {
+      const lastId = rows[0].id;
+      const match = lastId.match(/device_(\d+)/);
+      if (match) {
+        newDeviceNum = parseInt(match[1]) + 1;
+      }
+    }
+    
+    const newDeviceId = `device_${newDeviceNum}`;
+    const newDeviceName = `Device ${newDeviceNum}`;
+    
+    const { latitude, longitude, location_name } = req.body;
+    
+    await db.query(
+      `INSERT INTO devices (id, name, status, latitude, longitude, location_name)
+       VALUES (?, ?, 'offline', ?, ?, ?)`,
+      [newDeviceId, newDeviceName, latitude || null, longitude || null, location_name || null]
+    );
+    
+    res.json({ 
+      success: true, 
+      id: newDeviceId, 
+      name: newDeviceName 
+    });
+  } catch (error) {
+    console.error("Error adding device:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/* ================= DELETE DEVICE ================= */
+app.delete("/api/devices/:deviceId", async (req, res) => {
+  const { deviceId } = req.params;
+  
+  try {
+    // Delete sensor data first
+    await db.query("DELETE FROM sensor_data WHERE device_id = ?", [deviceId]);
+    // Then delete the device
+    await db.query("DELETE FROM devices WHERE id = ?", [deviceId]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting device:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 /* ================= UPDATE DEVICE GPS LOCATION ================= */
 app.put("/api/devices/:deviceId/location", async (req, res) => {
   const { deviceId } = req.params;
@@ -73,7 +126,13 @@ app.get("/api/gps-map", async (req, res) => {
       FROM devices 
       WHERE latitude IS NOT NULL AND longitude IS NOT NULL
     `);
-    res.json(rows);
+    // convert DECIMAL strings to numbers for client convenience
+    const output = rows.map(r => ({
+      ...r,
+      latitude: r.latitude !== null ? parseFloat(r.latitude) : null,
+      longitude: r.longitude !== null ? parseFloat(r.longitude) : null
+    }));
+    res.json(output);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -216,6 +275,7 @@ app.get("/api/data/:deviceId", async (req, res) => {
 /* ================= HISTORY (PER DEVICE) ================= */
 app.get("/api/history/:deviceId", async (req, res) => {
   const { deviceId } = req.params;
+  const limit = parseInt(req.query.limit) || 50;
 
   try {
     const [rows] = await db.query(
@@ -223,8 +283,8 @@ app.get("/api/history/:deviceId", async (req, res) => {
        FROM sensor_data
        WHERE device_id = ?
        ORDER BY created_at DESC
-       LIMIT 50`,
-      [deviceId]
+       LIMIT ?`,
+      [deviceId, limit]
     );
 
     res.json(rows.reverse());
