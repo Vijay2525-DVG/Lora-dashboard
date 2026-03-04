@@ -51,9 +51,13 @@ export default function FieldMap({ devices, onDeviceClick, selectedDevice }) {
       const { fieldName, row, col } = editingCell;
       
       // Save to backend
+      // include token so backend can check ownership
+      const hdrs = { "Content-Type": "application/json" };
+      const t = localStorage.getItem("token");
+      if (t) hdrs["Authorization"] = `Bearer ${t}`;
       fetch(`http://localhost:5000/api/devices/${deviceId}/location`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: hdrs,
         body: JSON.stringify({
           field_row: row,
           field_col: col,

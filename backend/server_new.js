@@ -261,6 +261,31 @@ app.post("/api/heartbeat/:deviceId", async (req, res) => {
   }
 });
 
+/* ================= DELETE DEVICE ================= */
+app.delete("/api/devices/:deviceId", async (req, res) => {
+  const { deviceId } = req.params;
+  
+  try {
+    // First delete sensor data for this device
+    await db.query(
+      "DELETE FROM sensor_data WHERE device_id = ?",
+      [deviceId]
+    );
+    // Then delete the device itself
+    const [result] = await db.query(
+      "DELETE FROM devices WHERE id = ?",
+      [deviceId]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Device not found" });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting device:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 /* ================= START ================= */
 app.listen(5000, () => {
   console.log("✅ Backend running on http://localhost:5000");

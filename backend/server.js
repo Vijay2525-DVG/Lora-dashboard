@@ -3,10 +3,74 @@ import cors from "cors";
 import { db } from "./db.js";
 import fs from "fs";
 import path from "path";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+
+// secret used to sign JWTs; in production set via environment variable
+const JWT_SECRET = process.env.JWT_SECRET || "supersecret123";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// automatically ensure needed schema changes are present
+async function ensureSchema() {
+  try {
+    // create users table if missing
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(50) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // add user_id column to devices if it doesn't exist (MySQL doesn't support ADD COLUMN IF NOT EXISTS on older versions)
+    const [cols] = await db.query("SHOW COLUMNS FROM devices LIKE 'user_id'");
+    if (cols.length === 0) {
+      await db.query(
+        "ALTER TABLE devices ADD COLUMN user_id INT NOT NULL DEFAULT 1"
+      );
+    }
+
+    // ensure foreign key exists
+    const [fks] = await db.query(
+      `SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'devices' AND COLUMN_NAME = 'user_id'
+         AND REFERENCED_TABLE_NAME = 'users'`
+    );
+    if (fks.length === 0) {
+      try {
+        await db.query("ALTER TABLE devices ADD FOREIGN KEY (user_id) REFERENCES users(id)");
+      } catch {}
+    }
+
+    // create alert_settings table if missing
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS alert_settings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        device_id VARCHAR(50) NOT NULL,
+        max_temp FLOAT,
+        min_temp FLOAT,
+        max_humidity FLOAT,
+        min_humidity FLOAT,
+        min_soil INT,
+        max_soil INT,
+        offline_minutes INT DEFAULT 30,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_device_user (user_id, device_id)
+      )
+    `);
+  } catch (err) {
+    console.error('Schema check error:', err.message);
+  }
+}
+
+// kick off schema check but don't await (server start doesn't depend on it)
+ensureSchema().catch(console.error);
 
 // JSON file path for storing sensor data
 const DATA_FILE = path.join(process.cwd(), "backend", "sensor_data.json");
@@ -38,10 +102,87 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-/* ================= DEVICES ================= */
-app.get("/api/devices", async (req, res) => {
+/* ================= AUTH HELPERS ================= */
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers["authorization"];
+  const token = authHeader && authHeader.split(" ")[1];
+  if (!token) return res.status(401).json({ error: "Missing token" });
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ error: "Invalid token" });
+    req.user = user;
+    next();
+  });
+}
+
+/* ================= AUTH ENDPOINTS ================= */
+app.post("/api/register", async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: "username and password required" });
+  }
   try {
-    const [rows] = await db.query("SELECT * FROM devices ORDER BY id");
+    const hash = await bcrypt.hash(password, 10);
+    await db.query("INSERT INTO users (username, password_hash) VALUES (?, ?)", [
+      username,
+      hash,
+    ]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Registration error:", err);
+    if (err.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({ error: "Username already taken" });
+    }
+    if (err.code === "ER_NO_SUCH_TABLE") {
+      return res.status(500).json({ error: "Database not initialized; please run setup_database.sql or restart the server to auto-create schema." });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/login", async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: "username and password required" });
+  }
+  try {
+    const [rows] = await db.query(
+      "SELECT * FROM users WHERE username = ?",
+      [username]
+    );
+    if (rows.length === 0) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    const user = rows[0];
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    const token = jwt.sign(
+      { id: user.id, username: user.username },
+      JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+    res.json({ token });
+  } catch (err) {
+    console.error("Login error:", err);
+    if (err.code === "ER_NO_SUCH_TABLE") {
+      return res.status(500).json({ error: "Database not initialized; please run setup_database.sql or restart the server to auto-create schema." });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= DEVICES ================= */
+app.get("/api/devices", authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT * FROM devices WHERE user_id = ? ORDER BY id",
+      [req.user.id]
+    );
+    console.log(`/api/devices requested by user ${req.user.id}, returning ${rows.length} rows`);
     res.json(rows);
   } catch (error) {
     console.error("Error fetching devices:", error);
@@ -49,52 +190,63 @@ app.get("/api/devices", async (req, res) => {
   }
 });
 
-/* ================= ADD NEW DEVICE ================= */
-app.post("/api/devices", async (req, res) => {
+// Debug: return current authenticated user info
+app.get("/api/me", authenticateToken, (req, res) => {
+  res.json({ id: req.user.id, username: req.user.username });
+});
+
+// Debug: return raw device row (no ownership check) for quick verification
+app.get("/api/device/:deviceId/raw", authenticateToken, async (req, res) => {
   try {
-    // Get the current max device number
-    const [rows] = await db.query("SELECT id FROM devices WHERE id LIKE 'device_%' ORDER BY id DESC LIMIT 1");
-    
-    let newDeviceNum = 1;
-    if (rows.length > 0) {
-      const lastId = rows[0].id;
-      const match = lastId.match(/device_(\d+)/);
-      if (match) {
-        newDeviceNum = parseInt(match[1]) + 1;
-      }
-    }
-    
-    const newDeviceId = `device_${newDeviceNum}`;
-    const newDeviceName = `Device ${newDeviceNum}`;
-    
-    const { latitude, longitude, location_name } = req.body;
-    
-    await db.query(
-      `INSERT INTO devices (id, name, status, latitude, longitude, location_name)
-       VALUES (?, ?, 'offline', ?, ?, ?)`,
-      [newDeviceId, newDeviceName, latitude || null, longitude || null, location_name || null]
-    );
-    
-    res.json({ 
-      success: true, 
-      id: newDeviceId, 
-      name: newDeviceName 
-    });
-  } catch (error) {
-    console.error("Error adding device:", error);
-    res.status(500).json({ error: error.message });
+    const [rows] = await db.query("SELECT * FROM devices WHERE id = ?", [req.params.deviceId]);
+    res.json(rows[0] || null);
+  } catch (err) {
+    console.error("Error fetching device raw:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
+
+app.post("/api/devices", authenticateToken, async (req, res) => {
+  const { name, latitude, longitude, location_name } = req.body;
+
+  if (!name) {
+    return res.status(400).json({ error: "Device name is required" });
+  }
+
+  try {
+    const [result] = await db.query(
+      `INSERT INTO devices (id, name, user_id, latitude, longitude, location_name, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'offline')`,
+      [name, name, req.user.id, latitude || null, longitude || null, location_name || null]
+    );
+
+    res.json({ success: true, id: result.insertId, name });
+  } catch (err) {
+    console.error("Error adding device:", err);
+    res.status(500).json({ error: "Failed to add device" });
+  }
+});
+
+
 /* ================= DELETE DEVICE ================= */
-app.delete("/api/devices/:deviceId", async (req, res) => {
+app.delete("/api/devices/:deviceId", authenticateToken, async (req, res) => {
   const { deviceId } = req.params;
   
   try {
-    // Delete sensor data first
-    await db.query("DELETE FROM sensor_data WHERE device_id = ?", [deviceId]);
-    // Then delete the device
-    await db.query("DELETE FROM devices WHERE id = ?", [deviceId]);
+    // Ensure the device belongs to the user and delete sensor data first
+    await db.query(
+      "DELETE sd FROM sensor_data sd JOIN devices d ON sd.device_id = d.id WHERE d.id = ? AND d.user_id = ?",
+      [deviceId, req.user.id]
+    );
+    // Then delete the device itself
+    const [result] = await db.query(
+      "DELETE FROM devices WHERE id = ? AND user_id = ?",
+      [deviceId, req.user.id]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Device not found or not owned by user" });
+    }
     res.json({ success: true });
   } catch (error) {
     console.error("Error deleting device:", error);
@@ -103,29 +255,50 @@ app.delete("/api/devices/:deviceId", async (req, res) => {
 });
 
 /* ================= UPDATE DEVICE GPS LOCATION ================= */
-app.put("/api/devices/:deviceId/location", async (req, res) => {
+app.put("/api/devices/:deviceId/location", authenticateToken, async (req, res) => {
   const { deviceId } = req.params;
-  const { latitude, longitude, location_name } = req.body;
+  const {
+    latitude,
+    longitude,
+    location_name,
+    field_row,
+    field_col,
+    field_name
+  } = req.body;
+
+  // debug log so we can see what was submitted
+  console.log(`PUT /api/devices/${deviceId}/location`, { latitude, longitude, location_name, name: req.body.name, userId: req.user.id });
 
   try {
-    await db.query(
-      `UPDATE devices SET latitude = ?, longitude = ?, location_name = ? WHERE id = ?`,
-      [latitude, longitude, location_name, deviceId]
+    // Update fields: name, location_name can be NULL (user can delete them)
+    // latitude/longitude/field_* use COALESCE to preserve if omitted
+    const [result] = await db.query(
+      `UPDATE devices SET name = COALESCE(?, name), latitude = COALESCE(?, latitude), longitude = COALESCE(?, longitude), location_name = ?,
+        field_row = COALESCE(?, field_row),
+        field_col = COALESCE(?, field_col),
+        field_name = COALESCE(?, field_name)
+       WHERE id = ? AND user_id = ?`,
+      [req.body.name || null, latitude ?? null, longitude ?? null, location_name ?? null, field_row, field_col, field_name, deviceId, req.user.id]
     );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Device not found or not owned by user" });
+    }
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
+
+
 /* ================= GET GPS MAP DATA ================= */
-app.get("/api/gps-map", async (req, res) => {
+app.get("/api/gps-map", authenticateToken, async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT id, name, status, latitude, longitude, location_name 
       FROM devices 
-      WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-    `);
+      WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND user_id = ?
+    `, [req.user.id]);
     // convert DECIMAL strings to numbers for client convenience
     const output = rows.map(r => ({
       ...r,
@@ -134,12 +307,14 @@ app.get("/api/gps-map", async (req, res) => {
     }));
     res.json(output);
   } catch (error) {
+    // log the error so developers can inspect server console
+    console.error("GET /api/gps-map error", error);
     res.status(500).json({ error: error.message });
   }
 });
 
 /* ================= GET ALL DEVICES LATEST DATA ================= */
-app.get("/api/all-devices-data", async (req, res) => {
+app.get("/api/all-devices-data", authenticateToken, async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT 
@@ -164,8 +339,9 @@ app.get("/api/all-devices-data", async (req, res) => {
           GROUP BY device_id
         )
       ) sd ON d.id = sd.device_id
+      WHERE d.user_id = ?
       ORDER BY d.id
-    `);
+    `, [req.user.id]);
     
     const deviceDataMap = {};
     rows.forEach(row => {
@@ -248,17 +424,18 @@ app.post("/api/data", async (req, res) => {
 });
 
 /* ================= FETCH LATEST (PER DEVICE) ================= */
-app.get("/api/data/:deviceId", async (req, res) => {
+app.get("/api/data/:deviceId", authenticateToken, async (req, res) => {
   const { deviceId } = req.params;
 
   try {
     const [rows] = await db.query(
-      `SELECT soil, temperature, humidity, rssi, created_at
-       FROM sensor_data
-       WHERE device_id = ?
-       ORDER BY created_at DESC
+      `SELECT sd.soil, sd.temperature, sd.humidity, sd.rssi, sd.created_at
+       FROM sensor_data sd
+       JOIN devices d ON sd.device_id = d.id
+       WHERE sd.device_id = ? AND d.user_id = ?
+       ORDER BY sd.created_at DESC
        LIMIT 1`,
-      [deviceId]
+      [deviceId, req.user.id]
     );
 
     if (rows.length === 0) {
@@ -272,19 +449,245 @@ app.get("/api/data/:deviceId", async (req, res) => {
   }
 });
 
+/* ================= ALERTS ================= */
+
+// Get all alert settings for user
+app.get("/api/alerts", authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT * FROM alert_settings WHERE user_id = ?`,
+      [req.user.id]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching alerts:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Save or update alert settings for a device
+app.post("/api/alerts", authenticateToken, async (req, res) => {
+  const { device_id, max_temp, min_temp, max_humidity, min_humidity, min_soil, max_soil, offline_minutes } = req.body;
+  
+  if (!device_id) {
+    return res.status(400).json({ error: "device_id is required" });
+  }
+
+  try {
+    // Check if device belongs to user
+    const [devices] = await db.query(
+      "SELECT id FROM devices WHERE id = ? AND user_id = ?",
+      [device_id, req.user.id]
+    );
+    
+    if (devices.length === 0) {
+      return res.status(404).json({ error: "Device not found or not owned by user" });
+    }
+
+    // Insert or update alert settings
+    await db.query(
+      `INSERT INTO alert_settings (user_id, device_id, max_temp, min_temp, max_humidity, min_humidity, min_soil, max_soil, offline_minutes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         max_temp = VALUES(max_temp),
+         min_temp = VALUES(min_temp),
+         max_humidity = VALUES(max_humidity),
+         min_humidity = VALUES(min_humidity),
+         min_soil = VALUES(min_soil),
+         max_soil = VALUES(max_soil),
+         offline_minutes = VALUES(offline_minutes)`,
+      [req.user.id, device_id, max_temp || null, min_temp || null, max_humidity || null, min_humidity || null, min_soil || null, max_soil || null, offline_minutes || 30]
+    );
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error saving alert:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete alert settings for a device
+app.delete("/api/alerts/:deviceId", authenticateToken, async (req, res) => {
+  const { deviceId } = req.params;
+  
+  try {
+    await db.query(
+      "DELETE FROM alert_settings WHERE device_id = ? AND user_id = ?",
+      [deviceId, req.user.id]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting alert:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get active alerts for all user devices
+app.get("/api/alerts/active", authenticateToken, async (req, res) => {
+  try {
+    // Get all devices with their latest data
+    const [devices] = await db.query(
+      `SELECT d.id, d.name, d.status, d.last_seen, d.latitude, d.longitude, d.location_name,
+              sd.soil, sd.temperature, sd.humidity, sd.created_at as last_update
+       FROM devices d
+       LEFT JOIN (
+         SELECT device_id, soil, temperature, humidity, created_at
+         FROM sensor_data
+         WHERE (device_id, created_at) IN (
+           SELECT device_id, MAX(created_at) FROM sensor_data GROUP BY device_id
+         )
+       ) sd ON d.id = sd.device_id
+       WHERE d.user_id = ?`,
+      [req.user.id]
+    );
+
+    // Get alert settings
+    const [alertSettings] = await db.query(
+      "SELECT * FROM alert_settings WHERE user_id = ?",
+      [req.user.id]
+    );
+
+    const alerts = [];
+    const now = new Date();
+
+    // Check each device against its thresholds
+    devices.forEach(device => {
+      const settings = alertSettings.find(s => s.device_id === device.id);
+      if (!settings) return;
+
+      const lastSeen = device.last_seen ? new Date(device.last_seen) : null;
+      const lastUpdate = device.last_update ? new Date(device.last_update) : null;
+
+      // Check offline threshold
+      if (settings.offline_minutes && lastSeen) {
+        const minutesOffline = (now - lastSeen) / (1000 * 60);
+        if (minutesOffline > settings.offline_minutes) {
+          alerts.push({
+            device_id: device.id,
+            device_name: device.name,
+            type: 'offline',
+            severity: 'warning',
+            message: `Device offline for ${Math.round(minutesOffline)} minutes (threshold: ${settings.offline_minutes} min)`
+          });
+        }
+      }
+
+      // Check temperature thresholds
+      if (device.temperature !== null) {
+        if (settings.max_temp && device.temperature > settings.max_temp) {
+          alerts.push({
+            device_id: device.id,
+            device_name: device.name,
+            type: 'temperature_high',
+            severity: 'critical',
+            message: `Temperature too high: ${device.temperature}°C (max: ${settings.max_temp}°C)`
+          });
+        }
+        if (settings.min_temp && device.temperature < settings.min_temp) {
+          alerts.push({
+            device_id: device.id,
+            device_name: device.name,
+            type: 'temperature_low',
+            severity: 'warning',
+            message: `Temperature too low: ${device.temperature}°C (min: ${settings.min_temp}°C)`
+          });
+        }
+      }
+
+      // Check humidity thresholds
+      if (device.humidity !== null) {
+        if (settings.max_humidity && device.humidity > settings.max_humidity) {
+          alerts.push({
+            device_id: device.id,
+            device_name: device.name,
+            type: 'humidity_high',
+            severity: 'warning',
+            message: `Humidity too high: ${device.humidity}% (max: ${settings.max_humidity}%)`
+          });
+        }
+        if (settings.min_humidity && device.humidity < settings.min_humidity) {
+          alerts.push({
+            device_id: device.id,
+            device_name: device.name,
+            type: 'humidity_low',
+            severity: 'warning',
+            message: `Humidity too low: ${device.humidity}% (min: ${settings.min_humidity}%)`
+          });
+        }
+      }
+
+      // Check soil moisture thresholds (for watering alerts)
+      if (device.soil !== null) {
+        if (settings.min_soil && device.soil < settings.min_soil) {
+          alerts.push({
+            device_id: device.id,
+            device_name: device.name,
+            type: 'soil_low',
+            severity: 'info',
+            message: `Soil moisture LOW - Time to water! (${device.soil} ADC, min: ${settings.min_soil})`
+          });
+        }
+        if (settings.max_soil && device.soil > settings.max_soil) {
+          alerts.push({
+            device_id: device.id,
+            device_name: device.name,
+            type: 'soil_high',
+            severity: 'info',
+            message: `Soil moisture HIGH - Stop watering! (${device.soil} ADC, max: ${settings.max_soil})`
+          });
+        }
+      }
+    });
+
+    res.json(alerts);
+  } catch (error) {
+    console.error("Error fetching active alerts:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 /* ================= HISTORY (PER DEVICE) ================= */
-app.get("/api/history/:deviceId", async (req, res) => {
+app.get("/api/history/:deviceId", authenticateToken, async (req, res) => {
   const { deviceId } = req.params;
   const limit = parseInt(req.query.limit) || 50;
+  const range = req.query.range || '24h'; // default to last 24 hours
+
+  // Calculate time range
+  let timeCondition = '';
+  const now = new Date();
+  
+  switch(range) {
+    case '1h':
+      timeCondition = 'AND sd.created_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)';
+      break;
+    case '6h':
+      timeCondition = 'AND sd.created_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)';
+      break;
+    case '24h':
+      timeCondition = 'AND sd.created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)';
+      break;
+    case '7d':
+      timeCondition = 'AND sd.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)';
+      break;
+    case '30d':
+      timeCondition = 'AND sd.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)';
+      break;
+    case 'all':
+      timeCondition = ''; // No time filter
+      break;
+    default:
+      timeCondition = 'AND sd.created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)';
+  }
 
   try {
     const [rows] = await db.query(
-      `SELECT soil, temperature, humidity, rssi, created_at
-       FROM sensor_data
-       WHERE device_id = ?
-       ORDER BY created_at DESC
+      `SELECT sd.soil, sd.temperature, sd.humidity, sd.rssi, sd.created_at
+       FROM sensor_data sd
+       JOIN devices d ON sd.device_id = d.id
+       WHERE sd.device_id = ? AND d.user_id = ? ${timeCondition}
+       ORDER BY sd.created_at DESC
        LIMIT ?`,
-      [deviceId, limit]
+      [deviceId, req.user.id, limit]
     );
 
     res.json(rows.reverse());
@@ -295,9 +698,22 @@ app.get("/api/history/:deviceId", async (req, res) => {
 });
 
 /* ================= GET JSON DATA (ALL DATA) ================= */
-app.get("/api/json-data", (req, res) => {
+app.get("/api/json-data", authenticateToken, async (req, res) => {
   const data = readSensorData();
-  res.json(data);
+  try {
+    const [rows] = await db.query("SELECT id FROM devices WHERE user_id = ?", [
+      req.user.id,
+    ]);
+    const userIds = new Set(rows.map(r => r.id));
+    const filtered = { devices: {} };
+    for (const id of Object.keys(data.devices || {})) {
+      if (userIds.has(id)) filtered.devices[id] = data.devices[id];
+    }
+    res.json(filtered);
+  } catch (err) {
+    console.error("Error filtering json-data:", err);
+    res.json(data); // fallback
+  }
 });
 
 /* ================= UPDATE DEVICE STATUS ================= */
@@ -320,13 +736,15 @@ app.listen(5000, () => {
   console.log("✅ Backend running on http://localhost:5000");
   console.log("📡 Endpoints:");
   console.log("   GET  /health              - Health check");
-  console.log("   GET  /api/devices         - List all devices");
-  console.log("   GET  /api/all-devices-data - Get all device latest data");
-  console.log("   GET  /api/data/:deviceId  - Get latest data for device");
-  console.log("   GET  /api/history/:deviceId - Get device history");
-  console.log("   GET  /api/gps-map         - Get devices with GPS");
-  console.log("   GET  /api/json-data       - Get all data in JSON format");
-  console.log("   POST /api/data            - Submit sensor data");
-  console.log("   PUT  /api/devices/:id/location - Update GPS location");
-  console.log("   POST /api/heartbeat/:deviceId - Device heartbeat");
+  console.log("   POST /api/register        - Create a new user account");
+  console.log("   POST /api/login           - Login and receive JWT");
+  console.log("   GET  /api/devices         - List all devices (requires auth)");
+  console.log("   GET  /api/all-devices-data - Get all device latest data (auth)");
+  console.log("   GET  /api/data/:deviceId  - Get latest data for device (auth)");
+  console.log("   GET  /api/history/:deviceId - Get device history (auth)");
+  console.log("   GET  /api/gps-map         - Get devices with GPS (auth)");
+  console.log("   GET  /api/json-data       - Get all data in JSON format (auth)");
+  console.log("   POST /api/data            - Submit sensor data (public)");
+  console.log("   PUT  /api/devices/:id/location - Update GPS location (auth)");
+  console.log("   POST /api/heartbeat/:deviceId - Device heartbeat (public)");
 });

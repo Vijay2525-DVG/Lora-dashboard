@@ -7,25 +7,44 @@ CREATE DATABASE IF NOT EXISTS lora_monitoring;
 USE lora_monitoring;
 
 -- =============================================
--- Devices Table
+-- Users Table
+-- =============================================
+DROP TABLE IF EXISTS users;
+CREATE TABLE users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- Devices Table (owned by users)
 -- =============================================
 DROP TABLE IF EXISTS devices;
 CREATE TABLE devices (
     id VARCHAR(50) PRIMARY KEY,
+    user_id INT NOT NULL,
     name VARCHAR(100) NOT NULL,
     status VARCHAR(20) DEFAULT 'offline',
     latitude DECIMAL(10, 8),
     longitude DECIMAL(11, 8),
     location_name VARCHAR(100),
     last_seen DATETIME,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    field_row INT,
+    field_col INT,
+    field_name VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- Insert sample devices with GPS coordinates
-INSERT INTO devices (id, name, status, latitude, longitude, location_name) VALUES 
-('NODE_01', 'Device 1', 'online', 14.4324, 75.9566, 'Main Location'),
-('NODE_02', 'Device 2', 'offline', 14.4330, 75.9570, 'Secondary Location'),
-('NODE_03', 'Device 3', 'offline', 14.4318, 75.9562, 'Tertiary Location');
+-- Insert a test user (for demo purposes)
+-- IMPORTANT: Each new user will have their own devices they add through the app
+INSERT INTO users (username, password_hash) VALUES 
+('testuser', '$2a$10$Xj60HjBM5gYiJrUn1cfks.mdDrftDtRfp6apqwkww2erYXkBr2iJG'); -- password is "password" for demo
+
+-- NOTE: No default devices are created here
+-- Users must add their own devices through the web interface
+-- This ensures proper data isolation between users
 
 -- =============================================
 -- Sensor Data Table
@@ -44,11 +63,3 @@ CREATE TABLE sensor_data (
 
 -- Create index for faster queries
 CREATE INDEX idx_device_created ON sensor_data(device_id, created_at);
-
--- =============================================
--- Test Data (Optional - for testing)
--- =============================================
- INSERT INTO sensor_data (device_id, soil, temperature, humidity, rssi) VALUES 
- ('NODE_01', 2535, 28, 60, -103),
- ('NODE_02', 1870, 30, 55, -98),
- ('NODE_03', 2200, 26, 68, -110);
