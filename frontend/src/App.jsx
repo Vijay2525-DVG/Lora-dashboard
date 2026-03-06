@@ -33,6 +33,8 @@ export default function App() {
   const [newDeviceData, setNewDeviceData] = useState({ name: "", latitude: "", longitude: "", location_name: "" });
   const [addingDevice, setAddingDevice] = useState(false);
   const [showAlertPanel, setShowAlertPanel] = useState(false);
+  const [alertCount, setAlertCount] = useState(0);
+  const [alertLoading, setAlertLoading] = useState(true);
 
   console.log("App rendering - devices:", devices.length, "selectedDeviceId:", selectedDeviceId, "token exists?", !!token);
   console.log("App state - backendOnline:", backendOnline, "loading:", loading, "error:", error);
@@ -90,6 +92,11 @@ export default function App() {
   useEffect(() => {
     if (!backendOnline || !token) return;
 
+    // Reset all device data when user changes
+    setAllDeviceData({});
+    setDeviceHistory({});
+    setSelectedDeviceId("");
+    
     setLoading(true);
     apiFetch("http://localhost:5000/api/devices")
       .then(r => {
@@ -110,6 +117,30 @@ export default function App() {
         setLoading(false);
         setError("Could not connect to backend. Make sure the server is running.");
       });
+  }, [backendOnline, token]);
+
+  /* Fetch active alerts count */
+  useEffect(() => {
+    if (!backendOnline || !token) return;
+
+    const fetchAlertCount = async () => {
+      try {
+        const response = await apiFetch("http://localhost:5000/api/alerts/active");
+        if (response.ok) {
+          const data = await response.json();
+          setAlertCount(data.length);
+        }
+      } catch (error) {
+        console.error("Error fetching alert count:", error);
+      } finally {
+        setAlertLoading(false);
+      }
+    };
+
+    fetchAlertCount();
+    const alertInterval = setInterval(fetchAlertCount, 30000); // Update every 30 seconds
+    
+    return () => clearInterval(alertInterval);
   }, [backendOnline, token]);
 
   /* Fetch ALL device data continuously */
@@ -530,8 +561,20 @@ export default function App() {
         </div>
         <div className="header-right">
           {/* Alert Button */}
-          <button className="alert-btn" onClick={() => setShowAlertPanel(true)}>
-            🔔 Alerts
+          <button className="alert-btn" onClick={async () => {
+            // Refresh alert count before opening
+            try {
+              const response = await apiFetch("http://localhost:5000/api/alerts/active");
+              if (response.ok) {
+                const data = await response.json();
+                setAlertCount(data.length);
+              }
+            } catch (error) {
+              console.error("Error fetching alert count:", error);
+            }
+            setShowAlertPanel(true);
+          }}>
+            🔔 Alerts {!alertLoading && alertCount > 0 && <span className="alert-badge">{alertCount}</span>}
           </button>
           {/* Time Range Selector */}
           <div className="time-range-selector">

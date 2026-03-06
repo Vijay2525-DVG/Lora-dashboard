@@ -61,7 +61,8 @@ async function ensureSchema() {
         offline_minutes INT DEFAULT 30,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_device_user (user_id, device_id)
+        UNIQUE KEY unique_device_user (user_id, device_id),
+        FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
       )
     `);
   } catch (err) {

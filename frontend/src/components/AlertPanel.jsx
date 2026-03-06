@@ -1,10 +1,11 @@
+
 import { useState, useEffect } from "react";
 
 export default function AlertPanel({ devices, onClose }) {
   const [activeAlerts, setActiveAlerts] = useState([]);
   const [alertSettings, setAlertSettings] = useState({});
   const [loading, setLoading] = useState(true);
-  const [showConfig, setShowConfig] = useState(false);
+  const [showConfig, setShowConfig] = useState(false); // false = active alerts, 'list' = configured devices, 'edit' = configure form
   const [selectedDevice, setSelectedDevice] = useState(null);
   const [configForm, setConfigForm] = useState({
     max_temp: 40,
@@ -22,7 +23,7 @@ export default function AlertPanel({ devices, onClose }) {
   // Fetch active alerts
   useEffect(() => {
     fetchActiveAlerts();
-    const interval = setInterval(fetchActiveAlerts, 30000); // Refresh every 30 seconds
+    const interval = setInterval(fetchActiveAlerts, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -78,6 +79,7 @@ export default function AlertPanel({ devices, onClose }) {
         alert("Alert settings saved successfully!");
         fetchAlertSettings();
         fetchActiveAlerts();
+        setShowConfig('list'); // Go back to list after saving
       }
     } catch (error) {
       console.error("Error saving alert settings:", error);
@@ -106,6 +108,7 @@ export default function AlertPanel({ devices, onClose }) {
           max_soil: 3000,
           offline_minutes: 30
         });
+        setSelectedDevice(null);
       }
     } catch (error) {
       console.error("Error deleting alert settings:", error);
@@ -160,6 +163,9 @@ export default function AlertPanel({ devices, onClose }) {
     }
   };
 
+  // Get list of devices that have alert configurations
+  const configuredDevices = Object.keys(alertSettings);
+
   return (
     <div className="alert-panel">
       <div className="alert-panel-header">
@@ -171,12 +177,16 @@ export default function AlertPanel({ devices, onClose }) {
         <button className={`alert-tab ${!showConfig ? 'active' : ''}`} onClick={() => setShowConfig(false)}>
           Active Alerts
         </button>
-        <button className={`alert-tab ${showConfig ? 'active' : ''}`} onClick={() => setShowConfig(true)}>
-          Configure
+        <button className={`alert-tab ${showConfig === 'list' ? 'active' : ''}`} onClick={() => setShowConfig('list')}>
+          My Devices ({configuredDevices.length})
+        </button>
+        <button className={`alert-tab ${showConfig === 'edit' ? 'active' : ''}`} onClick={() => setShowConfig('edit')}>
+          Configure New
         </button>
       </div>
 
-      {!showConfig ? (
+      {/* Active Alerts View */}
+      {!showConfig && (
         <div className="alert-list">
           {loading ? (
             <div className="alert-loading">Loading alerts...</div>
@@ -199,7 +209,55 @@ export default function AlertPanel({ devices, onClose }) {
             ))
           )}
         </div>
-      ) : (
+      )}
+
+      {/* My Configured Devices List */}
+      {showConfig === 'list' && (
+        <div className="configured-devices-list">
+          {configuredDevices.length === 0 ? (
+            <div className="alert-empty">
+              <span className="alert-empty-icon">📝</span>
+              <p>No devices configured yet</p>
+              <p className="alert-empty-sub">Click "Configure New" to add alert settings</p>
+              <button className="add-config-btn" onClick={() => setShowConfig('edit')}>
+                + Configure a Device
+              </button>
+            </div>
+          ) : (
+            <>
+              <p className="config-list-title">Devices with alert configurations:</p>
+              {configuredDevices.map(deviceId => {
+                const settings = alertSettings[deviceId];
+                const device = devices.find(d => d.id === deviceId);
+                return (
+                  <div 
+                    key={deviceId} 
+                    className="configured-device-card"
+                    onClick={() => { loadDeviceConfig(deviceId); setShowConfig('edit'); }}
+                  >
+                    <div className="configured-device-header">
+                      <strong>{device?.name || deviceId}</strong>
+                      <span className="edit-icon">✏️</span>
+                    </div>
+                    <div className="configured-device-values">
+                      <span>🌡️ Temp: {settings.min_temp}°C - {settings.max_temp}°C</span>
+                      <span>💨 Humidity: {settings.min_humidity}% - {settings.max_humidity}%</span>
+                      <span>💧 Soil: {settings.min_soil} - {settings.max_soil}</span>
+                      <span>📡 Offline: {settings.offline_minutes} min</span>
+                    </div>
+                  </div>
+                );
+              })}
+              <button className="add-config-btn" onClick={() => setShowConfig('edit')}>
+                + Configure Another Device
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Configure/Edit Form */}
+      {showConfig === 'edit' && (
         <div className="alert-config">
           <div className="config-device-select">
             <label>Select Device:</label>
@@ -216,7 +274,10 @@ export default function AlertPanel({ devices, onClose }) {
 
           {selectedDevice && (
             <div className="config-form">
-              <h4>Alert Thresholds for {devices.find(d => d.id === selectedDevice)?.name}</h4>
+              <h4>
+                Alert Thresholds for {devices.find(d => d.id === selectedDevice)?.name}
+                {alertSettings[selectedDevice] && <span className="edit-badge"> (Updating)</span>}
+              </h4>
               
               <div className="config-section">
                 <h5>🌡️ Temperature (°C)</h5>
@@ -291,7 +352,9 @@ export default function AlertPanel({ devices, onClose }) {
               </div>
 
               <div className="config-actions">
-                <button className="save-config-btn" onClick={handleSaveConfig}>Save Settings</button>
+                <button className="save-config-btn" onClick={handleSaveConfig}>
+                  {alertSettings[selectedDevice] ? 'Update Settings' : 'Save Settings'}
+                </button>
                 {alertSettings[selectedDevice] && (
                   <button className="delete-config-btn" onClick={handleDeleteConfig}>Delete</button>
                 )}
