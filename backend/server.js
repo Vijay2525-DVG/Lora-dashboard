@@ -22,9 +22,28 @@ async function ensureSchema() {
         id INT AUTO_INCREMENT PRIMARY KEY,
         username VARCHAR(50) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
+        role ENUM('user', 'admin') DEFAULT 'user',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // Check if role column exists, add if not
+    try {
+      await db.query("ALTER TABLE users ADD COLUMN role ENUM('user', 'admin') DEFAULT 'user'");
+    } catch (err) {
+      // Column might already exist, ignore error
+    }
+
+    // Create admin user if not exists (password: admin123)
+    const [existingAdmin] = await db.query("SELECT id FROM users WHERE username = 'admin'");
+    if (existingAdmin.length === 0) {
+      const adminHash = await bcrypt.hash('admin123', 10);
+      await db.query(
+        "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')",
+        ['admin', adminHash]
+      );
+      console.log("Admin user created with username: admin");
+    }
 
     // add user_id column to devices if it doesn't exist (MySQL doesn't support ADD COLUMN IF NOT EXISTS on older versions)
     const [cols] = await db.query("SHOW COLUMNS FROM devices LIKE 'user_id'");
@@ -65,6 +84,55 @@ async function ensureSchema() {
         FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
       )
     `);
+
+    // Create user_config table if missing
+    try {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS user_config (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          user_id INT NOT NULL UNIQUE,
+          max_lands INT DEFAULT 5,
+          max_sensors_per_land INT DEFAULT 10,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+      `);
+    } catch (err) {
+      // Table might exist
+    }
+
+    // Create lands table if missing
+    try {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS lands (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          user_id INT NOT NULL,
+          name VARCHAR(100) NOT NULL,
+          description VARCHAR(255),
+          latitude DECIMAL(10, 8),
+          longitude DECIMAL(11, 8),
+          total_sensors INT DEFAULT 0,
+          active_sensors INT DEFAULT 0,
+          status VARCHAR(20) DEFAULT 'active',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+      `);
+    } catch (err) {
+      // Table might exist
+    }
+
+    // Add land_id column to devices if not exists
+    try {
+      const [landCols] = await db.query("SHOW COLUMNS FROM devices LIKE 'land_id'");
+      if (landCols.length === 0) {
+        await db.query("ALTER TABLE devices ADD COLUMN land_id INT DEFAULT NULL");
+        await db.query("ALTER TABLE devices ADD FOREIGN KEY (land_id) REFERENCES lands(id)");
+      }
+    } catch (err) {
+      // Column might exist
+    }
   } catch (err) {
     console.error('Schema check error:', err.message);
   }
@@ -116,6 +184,17 @@ function authenticateToken(req, res, next) {
   });
 }
 
+// Admin middleware - checks if user has admin role
+function requireAdmin(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  next();
+}
+
 /* ================= AUTH ENDPOINTS ================= */
 app.post("/api/register", async (req, res) => {
   const { username, password } = req.body;
@@ -161,12 +240,15 @@ app.post("/api/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
+    // Get user role (default to 'user' if not set)
+    const userRole = user.role || 'user';
+    
     const token = jwt.sign(
-      { id: user.id, username: user.username },
+      { id: user.id, username: user.username, role: userRole },
       JWT_SECRET,
       { expiresIn: "1h" }
     );
-    res.json({ token });
+    res.json({ token, role: userRole });
   } catch (err) {
     console.error("Login error:", err);
     if (err.code === "ER_NO_SUCH_TABLE") {
@@ -732,6 +814,274 @@ app.post("/api/heartbeat/:deviceId", async (req, res) => {
   }
 });
 
+/* ================= ADMIN ENDPOINTS ================= */
+
+// Get all users (admin only)
+app.get("/api/admin/users", authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT id, username, role, created_at FROM users ORDER BY id"
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update user role (admin only)
+app.put("/api/admin/users/:id/role", authenticateToken, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { role } = req.body;
+  
+  if (!role || !['user', 'admin'].includes(role)) {
+    return res.status(400).json({ error: "Invalid role. Must be 'user' or 'admin'" });
+  }
+
+  try {
+    // Prevent changing own role
+    if (parseInt(id) === req.user.id) {
+      return res.status(400).json({ error: "Cannot change your own role" });
+    }
+
+    const [result] = await db.query(
+      "UPDATE users SET role = ? WHERE id = ?",
+      [role, id]
+    );
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error updating user role:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete user (admin only)
+app.delete("/api/admin/users/:id", authenticateToken, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    // Prevent deleting self
+    if (parseInt(id) === req.user.id) {
+      return res.status(400).json({ error: "Cannot delete your own account" });
+    }
+
+    // Delete user's devices and sensor data first
+    await db.query("DELETE FROM sensor_data WHERE device_id IN (SELECT id FROM devices WHERE user_id = ?)", [id]);
+    await db.query("DELETE FROM devices WHERE user_id = ?", [id]);
+    await db.query("DELETE FROM alert_settings WHERE user_id = ?", [id]);
+    
+    const [result] = await db.query("DELETE FROM users WHERE id = ?", [id]);
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting user:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get all devices with user info (admin only)
+app.get("/api/admin/devices", authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT d.*, u.username as owner_name, u.id as owner_id
+      FROM devices d
+      JOIN users u ON d.user_id = u.id
+      ORDER BY d.id
+    `);
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching all devices:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete any device (admin only)
+app.delete("/api/admin/devices/:deviceId", authenticateToken, requireAdmin, async (req, res) => {
+  const { deviceId } = req.params;
+  
+  try {
+    // Delete sensor data first
+    await db.query("DELETE FROM sensor_data WHERE device_id = ?", [deviceId]);
+    await db.query("DELETE FROM alert_settings WHERE device_id = ?", [deviceId]);
+    
+    const [result] = await db.query("DELETE FROM devices WHERE id = ?", [deviceId]);
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Device not found" });
+    }
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting device:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get all alerts across all users (admin only)
+app.get("/api/admin/alerts", authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    // Get all devices from all users with their latest data
+    const [devices] = await db.query(`
+      SELECT d.id, d.name, d.status, d.last_seen, d.user_id, u.username as owner_name,
+             sd.soil, sd.temperature, sd.humidity, sd.created_at as last_update
+      FROM devices d
+      JOIN users u ON d.user_id = u.id
+      LEFT JOIN (
+        SELECT device_id, soil, temperature, humidity, created_at
+        FROM sensor_data
+        WHERE (device_id, created_at) IN (
+          SELECT device_id, MAX(created_at) FROM sensor_data GROUP BY device_id
+        )
+      ) sd ON d.id = sd.device_id
+    `);
+
+    // Get all alert settings
+    const [alertSettings] = await db.query("SELECT * FROM alert_settings");
+
+    const alerts = [];
+    const now = new Date();
+
+    // Check each device against its thresholds
+    devices.forEach(device => {
+      const settings = alertSettings.find(s => s.device_id === device.id);
+      if (!settings) return;
+
+      const lastSeen = device.last_seen ? new Date(device.last_seen) : null;
+      const lastUpdate = device.last_update ? new Date(device.last_update) : null;
+
+      // Check offline threshold
+      if (settings.offline_minutes && lastSeen) {
+        const minutesOffline = (now - lastSeen) / (1000 * 60);
+        if (minutesOffline > settings.offline_minutes) {
+          alerts.push({
+            device_id: device.id,
+            device_name: device.name,
+            owner_id: device.user_id,
+            owner_name: device.owner_name,
+            type: 'offline',
+            severity: 'warning',
+            message: `Device offline for ${Math.round(minutesOffline)} minutes (threshold: ${settings.offline_minutes} min)`
+          });
+        }
+      }
+
+      // Check temperature thresholds
+      if (device.temperature !== null) {
+        if (settings.max_temp && device.temperature > settings.max_temp) {
+          alerts.push({
+            device_id: device.id,
+            device_name: device.name,
+            owner_id: device.user_id,
+            owner_name: device.owner_name,
+            type: 'temperature_high',
+            severity: 'critical',
+            message: `Temperature too high: ${device.temperature}°C (max: ${settings.max_temp}°C)`
+          });
+        }
+        if (settings.min_temp && device.temperature < settings.min_temp) {
+          alerts.push({
+            device_id: device.id,
+            device_name: device.name,
+            owner_id: device.user_id,
+            owner_name: device.owner_name,
+            type: 'temperature_low',
+            severity: 'warning',
+            message: `Temperature too low: ${device.temperature}°C (min: ${settings.min_temp}°C)`
+          });
+        }
+      }
+
+      // Check humidity thresholds
+      if (device.humidity !== null) {
+        if (settings.max_humidity && device.humidity > settings.max_humidity) {
+          alerts.push({
+            device_id: device.id,
+            device_name: device.name,
+            owner_id: device.user_id,
+            owner_name: device.owner_name,
+            type: 'humidity_high',
+            severity: 'warning',
+            message: `Humidity too high: ${device.humidity}% (max: ${settings.max_humidity}%)`
+          });
+        }
+        if (settings.min_humidity && device.humidity < settings.min_humidity) {
+          alerts.push({
+            device_id: device.id,
+            device_name: device.name,
+            owner_id: device.user_id,
+            owner_name: device.owner_name,
+            type: 'humidity_low',
+            severity: 'warning',
+            message: `Humidity too low: ${device.humidity}% (min: ${settings.min_humidity}%)`
+          });
+        }
+      }
+
+      // Check soil moisture thresholds
+      if (device.soil !== null) {
+        if (settings.min_soil && device.soil < settings.min_soil) {
+          alerts.push({
+            device_id: device.id,
+            device_name: device.name,
+            owner_id: device.user_id,
+            owner_name: device.owner_name,
+            type: 'soil_low',
+            severity: 'info',
+            message: `Soil moisture LOW - Time to water! (${device.soil} ADC, min: ${settings.min_soil})`
+          });
+        }
+        if (settings.max_soil && device.soil > settings.max_soil) {
+          alerts.push({
+            device_id: device.id,
+            device_name: device.name,
+            owner_id: device.user_id,
+            owner_name: device.owner_name,
+            type: 'soil_high',
+            severity: 'info',
+            message: `Soil moisture HIGH - Stop watering! (${device.soil} ADC, max: ${settings.max_soil})`
+          });
+        }
+      }
+    });
+
+    res.json(alerts);
+  } catch (error) {
+    console.error("Error fetching all alerts:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get admin dashboard stats
+app.get("/api/admin/stats", authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const [userCount] = await db.query("SELECT COUNT(*) as count FROM users");
+    const [deviceCount] = await db.query("SELECT COUNT(*) as count FROM devices");
+    const [onlineDeviceCount] = await db.query("SELECT COUNT(*) as count FROM devices WHERE status = 'online'");
+    const [totalReadings] = await db.query("SELECT COUNT(*) as count FROM sensor_data");
+    const [recentReadings] = await db.query("SELECT COUNT(*) as count FROM sensor_data WHERE created_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)");
+    
+    res.json({
+      totalUsers: userCount[0].count,
+      totalDevices: deviceCount[0].count,
+      onlineDevices: onlineDeviceCount[0].count,
+      totalReadings: totalReadings[0].count,
+      recentReadings: recentReadings[0].count
+    });
+  } catch (error) {
+    console.error("Error fetching admin stats:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 /* ================= START ================= */
 app.listen(5000, () => {
   console.log("✅ Backend running on http://localhost:5000");
@@ -748,4 +1098,12 @@ app.listen(5000, () => {
   console.log("   POST /api/data            - Submit sensor data (public)");
   console.log("   PUT  /api/devices/:id/location - Update GPS location (auth)");
   console.log("   POST /api/heartbeat/:deviceId - Device heartbeat (public)");
+  console.log("   --- Admin Endpoints ---");
+  console.log("   GET  /api/admin/users     - List all users (admin)");
+  console.log("   PUT  /api/admin/users/:id/role - Change user role (admin)");
+  console.log("   DELETE /api/admin/users/:id - Delete user (admin)");
+  console.log("   GET  /api/admin/devices   - List all devices (admin)");
+  console.log("   DELETE /api/admin/devices/:id - Delete any device (admin)");
+  console.log("   GET  /api/admin/alerts    - Get all alerts (admin)");
+  console.log("   GET  /api/admin/stats     - Get dashboard stats (admin)");
 });

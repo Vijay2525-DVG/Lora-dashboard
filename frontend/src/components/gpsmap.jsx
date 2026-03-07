@@ -17,6 +17,27 @@ export default function GPSMap({
   const [editingDevice, setEditingDevice] = useState(null);
   const [formData, setFormData] = useState({ latitude: "", longitude: "", location_name: "", name: "" });
   const [pickMode, setPickMode] = useState(false); // when true, next map click sets coordinates for existing device
+  const [mapType, setMapType] = useState("satellite"); // satellite, streets, terrain, dark
+  
+  // Map tile layer options
+  const mapLayers = {
+    satellite: {
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      name: 'Satellite'
+    },
+    streets: {
+      url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      name: 'Streets'
+    },
+    terrain: {
+      url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+      name: 'Terrain'
+    },
+    dark: {
+      url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      name: 'Dark'
+    }
+  };
 
   const validLocations = useMemo(() => {
     return Object.entries(deviceLocations)
@@ -137,6 +158,21 @@ export default function GPSMap({
   // initialize Leaflet map once and update markers on change
   const mapRef = useRef(null);
   const boundaryRef = useRef(null);
+  const tileLayerRef = useRef(null);
+  
+  // Handle map type change
+  useEffect(() => {
+    if (mapRef.current) {
+      // Remove existing tile layer if it exists
+      if (tileLayerRef.current) {
+        mapRef.current.removeLayer(tileLayerRef.current);
+      }
+      // Add new tile layer
+      tileLayerRef.current = L.tileLayer(mapLayers[mapType].url, {
+        attribution: ''
+      }).addTo(mapRef.current);
+    }
+  }, [mapType, mapLayers]);
   
   useEffect(() => {
     if (mapRef.current === null) {
@@ -160,10 +196,12 @@ export default function GPSMap({
         easeLinearity: 0.25,         // smoother easing
         attributionControl: false   // hide default attribution
       });
-      // switch to satellite imagery tile layer (ESRI World Imagery)
-      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      // Initialize map and store tile layer reference
+      const tileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
         attribution: '' // no visible attribution
-      }).addTo(mapRef.current);
+      });
+      tileLayerRef.current = tileLayer;
+      tileLayer.addTo(mapRef.current);
     }
 
     if (mapRef.current) {
@@ -349,6 +387,14 @@ export default function GPSMap({
     <div className="gps-map-container">
       <div className="gps-map-header">
         <h3>📍 GPS Sensor Map</h3>
+        <div className="map-type-selector">
+          <label>Map Type:</label>
+          <select value={mapType} onChange={(e) => setMapType(e.target.value)}>
+            {Object.entries(mapLayers).map(([key, layer]) => (
+              <option key={key} value={key}>{layer.name}</option>
+            ))}
+          </select>
+        </div>
         <div className="gps-legend">
           <span className="legend-item"><span className="dot online"></span> Online</span>
           <span className="legend-item"><span className="dot offline"></span> Offline</span>

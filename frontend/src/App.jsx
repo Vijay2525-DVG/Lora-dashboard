@@ -1,12 +1,17 @@
 import { useEffect, useState } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import StatCard from "./components/statcard";
 import SensorChart from "./components/sensorchart";
+import MultiDeviceChart from "./components/MultiDeviceChart";
 import DataTable from "./components/datatable";
 import GPSMap from "./components/gpsmap";
 import DeviceDetail from "./components/DeviceDetail";
 import AlertPanel from "./components/AlertPanel";
+import AdminPanel from "./components/AdminPanel";
+import Admin from "./pages/Admin";
 
-export default function App() {
+function Dashboard() {
+  const navigate = useNavigate();
   // --- authentication state ---
   const [token, setToken] = useState(localStorage.getItem("token") || "");
   const [usernameDisplay, setUsernameDisplay] = useState("");
@@ -35,21 +40,28 @@ export default function App() {
   const [showAlertPanel, setShowAlertPanel] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
   const [alertLoading, setAlertLoading] = useState(true);
+  const [userRole, setUserRole] = useState(localStorage.getItem("userRole") || "");
+  const [showPassword, setShowPassword] = useState(false);
+  const [alertSettings, setAlertSettings] = useState({});
 
-  console.log("App rendering - devices:", devices.length, "selectedDeviceId:", selectedDeviceId, "token exists?", !!token);
-  console.log("App state - backendOnline:", backendOnline, "loading:", loading, "error:", error);
-
-  /* decode token to show username */
+  /* decode token to show username and role */
   useEffect(() => {
     if (token) {
       try {
         const payload = JSON.parse(atob(token.split('.')[1]));
         setUsernameDisplay(payload.username || "");
+        const role = payload.role || "user";
+        setUserRole(role);
+        localStorage.setItem("userRole", role);
       } catch (e) {
         setUsernameDisplay("");
+        setUserRole("user");
+        localStorage.setItem("userRole", "user");
       }
     } else {
       setUsernameDisplay("");
+      setUserRole("");
+      localStorage.removeItem("userRole");
     }
   }, [token]);
 
@@ -118,6 +130,27 @@ export default function App() {
         setError("Could not connect to backend. Make sure the server is running.");
       });
   }, [backendOnline, token]);
+
+  /* Fetch alert settings for all devices */
+  useEffect(() => {
+    if (!backendOnline || !token || devices.length === 0) return;
+    
+    const fetchAlertSettings = async () => {
+      try {
+        const response = await apiFetch("http://localhost:5000/api/alerts");
+        if (response.ok) {
+          const data = await response.json();
+          const settingsMap = {};
+          data.forEach(s => { settingsMap[s.device_id] = s; });
+          setAlertSettings(settingsMap);
+        }
+      } catch (error) {
+        console.error("Error fetching alert settings:", error);
+      }
+    };
+    
+    fetchAlertSettings();
+  }, [backendOnline, token, devices.length]);
 
   /* Fetch active alerts count */
   useEffect(() => {
@@ -403,101 +436,287 @@ export default function App() {
   }, [selectedDeviceId, timeRange]);
   const onlineDevices = Object.values(allDeviceData).filter(d => d.status === 'online').length;
 
-  // if user not logged in show auth form
+  // if user not logged in show landing page with auth modal
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  
   if (!token) {
     return (
-      <div className="page">
-        <div className="auth-container">
-          <h2>{authMode === "login" ? "Welcome Back" : "Create Account"}</h2>
-          <p className="auth-subtitle">
-            {authMode === "login" 
-              ? "Sign in to access your LoRa sensors" 
-              : "Register to start monitoring your sensors"}
-          </p>
-          
-          {/* Toggle Buttons */}
-          <div className="auth-buttons">
-            <button 
-              className={`auth-btn ${authMode === "login" ? "active" : ""}`}
-              onClick={() => { setAuthMode("login"); setAuthError(null); }}
-            >
-              Sign In
+      <div className="landing-page">
+        {/* Header */}
+        <header className="landing-header">
+          <div className="landing-logo">
+            <span className="logo-icon">📡</span>
+            <span className="logo-text">LoRa Soil Monitor</span>
+          </div>
+          <nav className="landing-nav">
+            <a href="#home" className="nav-link">Home</a>
+            <a href="#features" className="nav-link">Features</a>
+            <a href="#how-it-works" className="nav-link">How It Works</a>
+            <a href="#about" className="nav-link">About</a>
+            <a href="#contact" className="nav-link">Contact</a>
+          </nav>
+          <div className="landing-auth-buttons">
+            <button className="btn-login" onClick={() => { setAuthMode("login"); setShowAuthModal(true); setAuthError(null); }}>
+              Login
             </button>
-            <button 
-              className={`auth-btn ${authMode === "register" ? "active" : ""}`}
-              onClick={() => { setAuthMode("register"); setAuthError(null); }}
-            >
-              Register
+            <button className="btn-signup" onClick={() => { setAuthMode("register"); setShowAuthModal(true); setAuthError(null); }}>
+              Sign Up
             </button>
           </div>
-          
-          <form 
-            className="auth-form"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              setAuthError(null);
-              const url = authMode === "login" ? "/api/login" : "/api/register";
-              try {
-                const r = await fetch("http://localhost:5000" + url, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    username: authUser,
-                    password: authPass,
-                  }),
-                });
-                const data = await r.json();
-                if (!r.ok) {
-                  throw new Error(data.error || "Authentication failed");
-                }
-                if (authMode === "login") {
-                  setToken(data.token);
-                  localStorage.setItem("token", data.token);
-                } else {
-                  // after registering, switch to login automatically
-                  setAuthMode("login");
-                  setAuthError("Registration successful, please login.");
-                }
-              } catch (err) {
-                console.error("Auth error", err);
-                setAuthError(err.message);
-              }
-            }}
-          >
-            <label>Username</label>
-            <input
-              type="text"
-              placeholder="Enter your username"
-              value={authUser}
-              onChange={(e) => setAuthUser(e.target.value)}
-              required
-            />
-            <label>Password</label>
-            <input
-              type="password"
-              placeholder="Enter your password"
-              value={authPass}
-              onChange={(e) => setAuthPass(e.target.value)}
-              required
-            />
-            {authError && <p className="auth-error">{authError}</p>}
-            <button type="submit">
-              {authMode === "login" ? "Sign In" : "Create Account"}
-            </button>
-          </form>
-          
-          <div className="auth-switch">
-            <p>
-              {authMode === "login" ? "Don't have an account?" : "Already have an account?"}
-              <button onClick={() => {
-                setAuthMode(authMode === "login" ? "register" : "login");
-                setAuthError(null);
-              }}>
-                {authMode === "login" ? "Register" : "Sign In"}
+        </header>
+
+        {/* Hero Section */}
+        <section id="home" className="landing-hero">
+          <div className="hero-bg-pattern"></div>
+          <div className="hero-content-landing">
+            <h1>Smart Agriculture Through<br /><span className="gradient-text">IoT Innovation</span></h1>
+            <p className="hero-subtitle">Monitor your soil conditions in real-time with LoRa technology. Make data-driven decisions for healthier crops and higher yields.</p>
+            <div className="hero-buttons">
+              <button className="btn-primary" onClick={() => { setAuthMode("register"); setShowAuthModal(true); setAuthError(null); }}>
+                Get Started Free <span>→</span>
               </button>
-            </p>
+              <button className="btn-secondary" onClick={() => document.getElementById('features').scrollIntoView({ behavior: 'smooth' })}>
+                Learn More
+              </button>
+            </div>
+            <div className="hero-stats-landing">
+              <div className="stat-item">
+                <span className="stat-value">500+</span>
+                <span className="stat-label">Active Sensors</span>
+              </div>
+              <div className="stat-divider"></div>
+              <div className="stat-item">
+                <span className="stat-value">99.9%</span>
+                <span className="stat-label">Uptime</span>
+              </div>
+              <div className="stat-divider"></div>
+              <div className="stat-item">
+                <span className="stat-value">24/7</span>
+                <span className="stat-label">Monitoring</span>
+              </div>
+            </div>
           </div>
-        </div>
+        </section>
+
+        {/* Features Section */}
+        <section id="features" className="features-section">
+          <div className="section-header">
+            <h2>Powerful Features</h2>
+            <p>Everything you need to monitor and manage your agricultural sensors</p>
+          </div>
+          <div className="features-grid">
+            <div className="feature-card">
+              <div className="feature-icon-large">🌱</div>
+              <h3>Soil Monitoring</h3>
+              <p>Track soil moisture, temperature, and humidity in real-time. Get accurate readings from multiple sensors across your fields.</p>
+            </div>
+            <div className="feature-card">
+              <div className="feature-icon-large">📊</div>
+              <h3>Data Visualization</h3>
+              <p>Beautiful interactive charts and graphs. View historical data, analyze trends, and export reports for better decision making.</p>
+            </div>
+            <div className="feature-card">
+              <div className="feature-icon-large">🔔</div>
+              <h3>Smart Alerts</h3>
+              <p>Configure custom thresholds and receive instant notifications via the dashboard when conditions need attention.</p>
+            </div>
+            <div className="feature-card">
+              <div className="feature-icon-large">🗺️</div>
+              <h3>GPS Tracking</h3>
+              <p>Visualize all your devices on an interactive map. Know the exact location of every sensor in your network.</p>
+            </div>
+            <div className="feature-card">
+              <div className="feature-icon-large">📡</div>
+              <h3>LoRa Technology</h3>
+              <p>Long-range wireless communication with low power consumption. Connect sensors kilometers away from the gateway.</p>
+            </div>
+            <div className="feature-card">
+              <div className="feature-icon-large">🔒</div>
+              <h3>Secure Access</h3>
+              <p>Role-based access control ensures data security. Manage team members with admin and user permissions.</p>
+            </div>
+          </div>
+        </section>
+
+        {/* How It Works Section */}
+        <section id="how-it-works" className="how-it-works-section">
+          <div className="section-header">
+            <h2>How It Works</h2>
+            <p>Get started in three simple steps</p>
+          </div>
+          <div className="steps-container">
+            <div className="step-item">
+              <div className="step-number">1</div>
+              <h3>Create Account</h3>
+              <p>Sign up for free and create your dashboard</p>
+            </div>
+            <div className="step-connector"></div>
+            <div className="step-item">
+              <div className="step-number">2</div>
+              <h3>Add Devices</h3>
+              <p>Register your LoRa sensors to your account</p>
+            </div>
+            <div className="step-connector"></div>
+            <div className="step-item">
+              <div className="step-number">3</div>
+              <h3>Start Monitoring</h3>
+              <p>View real-time data and configure alerts</p>
+            </div>
+          </div>
+        </section>
+
+        {/* CTA Section */}
+        <section className="cta-section">
+          <div className="cta-content">
+            <h2>Ready to Transform Your Agriculture?</h2>
+            <p>Join thousands of farmers already using IoT to improve their yield</p>
+            <button className="btn-primary btn-large" onClick={() => { setAuthMode("register"); setShowAuthModal(true); setAuthError(null); }}>
+              Start Free Today <span>→</span>
+            </button>
+          </div>
+        </section>
+
+        {/* Footer */}
+        <footer id="contact" className="landing-footer">
+          <div className="footer-content">
+            <div className="footer-brand">
+              <div className="landing-logo">
+                <span className="logo-icon">📡</span>
+                <span className="logo-text">LoRa Soil Monitor</span>
+              </div>
+              <p>Real-time IoT sensor monitoring for smart agriculture</p>
+            </div>
+            <div className="footer-links">
+              <div className="footer-column">
+                <h4>Product</h4>
+                <a href="#features">Features</a>
+                <a href="#how-it-works">How It Works</a>
+                <a href="#">Pricing</a>
+              </div>
+              <div className="footer-column">
+                <h4>Company</h4>
+                <a href="#about">About</a>
+                <a href="#contact">Contact</a>
+                <a href="#">Careers</a>
+              </div>
+              <div className="footer-column">
+                <h4>Support</h4>
+                <a href="#">Documentation</a>
+                <a href="#">API</a>
+                <a href="#">Status</a>
+              </div>
+            </div>
+          </div>
+          <div className="footer-bottom">
+            <p>&copy; 2024 LoRa Soil Monitor. All rights reserved.</p>
+          </div>
+        </footer>
+
+        {/* Auth Modal */}
+        {showAuthModal && (
+          <div className="modal-overlay" onClick={() => setShowAuthModal(false)}>
+            <div className="auth-modal" onClick={(e) => e.stopPropagation()}>
+              <button className="modal-close" onClick={() => setShowAuthModal(false)}>×</button>
+              <div className="auth-modal-header">
+                <h2>{authMode === "login" ? "Welcome Back" : "Create Account"}</h2>
+                <p>{authMode === "login" ? "Sign in to your dashboard" : "Start your free account"}</p>
+              </div>
+              
+              <div className="auth-modal-tabs">
+                <button 
+                  className={`auth-modal-tab ${authMode === "login" ? "active" : ""}`}
+                  onClick={() => { setAuthMode("login"); setAuthError(null); }}
+                >
+                  Login
+                </button>
+                <button 
+                  className={`auth-modal-tab ${authMode === "register" ? "active" : ""}`}
+                  onClick={() => { setAuthMode("register"); setAuthError(null); }}
+                >
+                  Sign Up
+                </button>
+              </div>
+              
+              <form 
+                className="auth-modal-form"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  setAuthError(null);
+                  const url = authMode === "login" ? "/api/login" : "/api/register";
+                  try {
+                    const r = await fetch("http://localhost:5000" + url, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        username: authUser,
+                        password: authPass,
+                      }),
+                    });
+                    const data = await r.json();
+                    if (!r.ok) {
+                      throw new Error(data.error || "Authentication failed");
+                    }
+                    if (authMode === "login") {
+                      setToken(data.token);
+                      localStorage.setItem("token", data.token);
+                      setShowAuthModal(false);
+                    } else {
+                      setAuthMode("login");
+                      setAuthError("Registration successful! Please sign in.");
+                    }
+                  } catch (err) {
+                    console.error("Auth error", err);
+                    setAuthError(err.message);
+                  }
+                }}
+              >
+                <div className="form-group-modal">
+                  <label>Username</label>
+                  <input
+                    type="text"
+                    placeholder="Enter your username"
+                    value={authUser}
+                    onChange={(e) => setAuthUser(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="form-group-modal">
+                  <label>Password</label>
+                  <div className="password-input-wrapper">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Enter your password"
+                      value={authPass}
+                      onChange={(e) => setAuthPass(e.target.value)}
+                      required
+                    />
+                    <button 
+                      type="button" 
+                      className="password-toggle"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                          <line x1="1" y1="1" x2="23" y2="23"></line>
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                          <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
+                {authError && <div className="auth-error-modal">{authError}</div>}
+                <button type="submit" className="auth-modal-submit">
+                  {authMode === "login" ? "Sign In" : "Create Account"}
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -605,6 +824,11 @@ export default function App() {
           <button className={`demo-btn ${showMap ? "active" : ""}`} onClick={() => setShowMap(!showMap)}>
             {showMap ? "Hide Map" : "Show Map"}
           </button>
+          {userRole === "admin" && (
+            <a href="/admin" className="admin-btn">
+              Admin
+            </a>
+          )}
           <span className={backendOnline ? "online" : "offline"}>
             {backendOnline ? "ONLINE" : "OFFLINE"}
           </span>
@@ -732,46 +956,76 @@ export default function App() {
       )}
 
       {viewMode === "all" && (
-        <div className="all-devices-grid">
-          {devices.map(device => {
-            const data = allDeviceData[device.id];
-            const isOnline = data?.status === 'online';
-            return (
-              <div key={device.id} className={`device-card ${selectedDeviceId === device.id ? 'selected' : ''}`}
-                onClick={() => setSelectedDeviceId(device.id)}>
-                <div className="device-card-header">
-                  <h4>{device.name || device.id}</h4>
-                  <div className="device-header-actions">
-                    <span className={isOnline ? "online" : "offline"} style={{fontSize: '16px'}}>{isOnline ? "●" : "●"}</span>
-                    <button 
-                      className="delete-device-btn" 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteDevice(device.id, device.name || device.id);
-                      }}
-                      title="Delete device"
-                    >
-                      🗑️
-                    </button>
+        <>
+          <div className="all-devices-grid">
+            {devices.map(device => {
+              const data = allDeviceData[device.id];
+              const isOnline = data?.status === 'online';
+              return (
+                <div key={device.id} className={`device-card ${selectedDeviceId === device.id ? 'selected' : ''}`}
+                  onClick={() => setSelectedDeviceId(device.id)}>
+                  <div className="device-card-header">
+                    <h4>{device.name || device.id}</h4>
+                    <div className="device-header-actions">
+                      <span className={isOnline ? "online" : "offline"} style={{fontSize: '16px'}}>{isOnline ? "●" : "●"}</span>
+                      <button 
+                        className="delete-device-btn" 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteDevice(device.id, device.name || device.id);
+                        }}
+                        title="Delete device"
+                      >
+                        🗑️
+                      </button>
+                    </div>
                   </div>
+                  {data && isOnline ? (
+                    <div className="device-card-stats">
+                      <div className="stat"><span className="label">Soil</span><span className="value">{data.soil}</span></div>
+                      <div className="stat"><span className="label">Temp</span><span className="value">{data.temperature}°C</span></div>
+                      <div className="stat"><span className="label">Hum</span><span className="value">{data.humidity}%</span></div>
+                      <div className="stat"><span className="label">RSSI</span><span className="value">{data.rssi}</span></div>
+                    </div>
+                  ) : (
+                    <div className="no-data">No data received</div>
+                  )}
+                  <button className="view-device-btn" onClick={(e) => { e.stopPropagation(); setSelectedDeviceId(device.id); setViewMode("single"); }}>
+                    View Details
+                  </button>
                 </div>
-                {data && isOnline ? (
-                  <div className="device-card-stats">
-                    <div className="stat"><span className="label">Soil</span><span className="value">{data.soil}</span></div>
-                    <div className="stat"><span className="label">Temp</span><span className="value">{data.temperature}°C</span></div>
-                    <div className="stat"><span className="label">Hum</span><span className="value">{data.humidity}%</span></div>
-                    <div className="stat"><span className="label">RSSI</span><span className="value">{data.rssi}</span></div>
-                  </div>
-                ) : (
-                  <div className="no-data">No data received</div>
-                )}
-                <button className="view-device-btn" onClick={(e) => { e.stopPropagation(); setSelectedDeviceId(device.id); setViewMode("single"); }}>
-                  View Details
-                </button>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+          
+          {/* Multi-Device Charts */}
+          {devices.length > 0 && (
+            <div className="multi-device-charts">
+              <h3 className="charts-section-title">📊 All Devices Comparison</h3>
+              <MultiDeviceChart 
+                title="Soil Moisture - All Devices" 
+                data={deviceHistory} 
+                dataKey="soil" 
+                unit="ADC"
+                alertSettings={alertSettings}
+              />
+              <MultiDeviceChart 
+                title="Temperature - All Devices" 
+                data={deviceHistory} 
+                dataKey="temperature" 
+                unit="°C"
+                alertSettings={alertSettings}
+              />
+              <MultiDeviceChart 
+                title="Humidity - All Devices" 
+                data={deviceHistory} 
+                dataKey="humidity" 
+                unit="%"
+                alertSettings={alertSettings}
+              />
+            </div>
+          )}
+        </>
       )}
 
       {viewMode === "single" && (
@@ -823,5 +1077,39 @@ export default function App() {
         </div>
       )}
     </div>
+  );
+}
+
+// App component with routing
+export default function App() {
+  const token = localStorage.getItem("token") || "";
+  const userRole = localStorage.getItem("userRole") || "";
+  
+  // Helper function to create apiFetch with token
+  const createApiFetch = (authToken) => {
+    return async (url, options = {}) => {
+      const hdrs = { ...(options.headers || {}) };
+      if (authToken) {
+        hdrs["Authorization"] = `Bearer ${authToken}`;
+      }
+      const resp = await fetch(url, { ...options, headers: hdrs });
+      return resp;
+    };
+  };
+
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route 
+          path="/admin" 
+          element={
+            token && userRole === "admin" ? 
+              <Admin token={token} apiFetch={createApiFetch(token)} /> : 
+              <Navigate to="/" />
+          } 
+        />
+      </Routes>
+    </BrowserRouter>
   );
 }
