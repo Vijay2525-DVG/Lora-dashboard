@@ -1,27 +1,20 @@
-# TODO: Reports Feature Implementation
+# TODO - Multi-Device Chart with Min/Max Lines
 
-## Backend (server.js)
-- [x] 1. Add GET /api/reports/daily-summary - Get daily aggregated sensor data
-- [x] 2. Add GET /api/reports/weekly-data - Get weekly sensor data with hourly/daily aggregation
-- [x] 3. Add GET /api/reports/alerts-history - Get historical alerts
+## Task: Show all devices in single chart for temp, moisture, humidity with min/max lines
 
-## Frontend
-- [x] 4. Install jspdf and jspdf-autotable packages
-- [x] 5. Create Reports.jsx component with:
-      - Daily Summary report view
-      - Weekly Sensor Data report view
-      - Alert Reports view
-      - CSV export functionality
-      - PDF export functionality
-- [x] 6. Add Reports navigation in dashboard header
-- [x] 7. Update App.jsx to include Reports modal
+### Steps:
+- [x] 1. Analyze codebase and create plan
+- [x] 2. Update MultiDeviceChart.jsx - Implement multi-device chart with metric selector and min/max reference lines
+- [x] 3. Update App.jsx - Pass deviceHistory and alertSettings props to MultiDeviceChart
+- [x] 4. Add CSS styles for the multi-device chart
+- [x] 5. Implementation Complete
 
-## Reports Include:
-1. **Daily Summary** - Aggregated daily data (avg/min/max temp, humidity, soil)
-2. **Weekly Sensor Data** - Hourly/daily sensor readings for the week
-3. **Alert Reports** - Historical alerts with timestamps and details
-
-## Export Formats:
-- **CSV** - Download sensor data as CSV files
-- **PDF** - Generate formatted PDF reports with charts/tables
+### Implementation Details:
+- Use alertSettings min/max values as reference lines
+- Default values if no settings exist:
+  - Temp: 10°C - 40°C
+  - Humidity: 20% - 90%
+  - Soil: 1500 - 3000
+- Add dropdown to switch between Temperature, Soil Moisture, Humidity
+- Plot each device as separate colored line
 

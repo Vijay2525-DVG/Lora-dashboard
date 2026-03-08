@@ -882,7 +882,7 @@ generateDemoData();
       <div className="dashboard-content">
         {viewMode === 'all' ? (
           <div className="all-devices-view">
-            <MultiDeviceChart devices={devices} allDeviceData={allDeviceData} />
+<MultiDeviceChart devices={devices} allDeviceData={allDeviceData} deviceHistory={deviceHistory} alertSettings={alertSettings} />
           </div>
         ) : (
         <>
