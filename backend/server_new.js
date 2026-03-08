@@ -286,6 +286,126 @@ app.delete("/api/devices/:deviceId", async (req, res) => {
   }
 });
 
+/* ================= REPORTS API ================= */
+
+// Get daily summary report - aggregated data for each device
+app.get("/api/reports/daily-summary", async (req, res) => {
+  const { date } = req.query;
+  
+  const targetDate = date || new Date().toISOString().split('T')[0];
+  const startOfDay = `${targetDate} 00:00:00`;
+  const endOfDay = `${targetDate} 23:59:59`;
+
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        d.id as device_id,
+        d.name as device_name,
+        d.location_name,
+        COUNT(sd.id) as reading_count,
+        AVG(sd.soil) as avg_soil,
+        MIN(sd.soil) as min_soil,
+        MAX(sd.soil) as max_soil,
+        AVG(sd.temperature) as avg_temperature,
+        MIN(sd.temperature) as min_temperature,
+        MAX(sd.temperature) as max_temperature,
+        AVG(sd.humidity) as avg_humidity,
+        MIN(sd.humidity) as min_humidity,
+        MAX(sd.humidity) as max_humidity,
+        AVG(sd.rssi) as avg_rssi
+      FROM devices d
+      LEFT JOIN sensor_data sd ON d.id = sd.device_id 
+        AND sd.created_at BETWEEN ? AND ?
+      GROUP BY d.id, d.name, d.location_name
+      ORDER BY d.name
+    `, [startOfDay, endOfDay]);
+
+    const results = rows.map(row => ({
+      device_id: row.device_id,
+      device_name: row.device_name,
+      location_name: row.location_name,
+      reading_count: row.reading_count,
+      avg_soil: row.avg_soil ? parseFloat(row.avg_soil.toFixed(2)) : null,
+      min_soil: row.min_soil,
+      max_soil: row.max_soil,
+      avg_temperature: row.avg_temperature ? parseFloat(row.avg_temperature.toFixed(2)) : null,
+      min_temperature: row.min_temperature,
+      max_temperature: row.max_temperature,
+      avg_humidity: row.avg_humidity ? parseFloat(row.avg_humidity.toFixed(2)) : null,
+      min_humidity: row.min_humidity,
+      max_humidity: row.max_humidity,
+      avg_rssi: row.avg_rssi ? parseFloat(row.avg_rssi.toFixed(2)) : null
+    }));
+
+    res.json({ date: targetDate, devices: results });
+  } catch (error) {
+    console.error("Error fetching daily summary:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get weekly sensor data - hourly aggregated data for the week
+app.get("/api/reports/weekly-data", async (req, res) => {
+  const { startDate, endDate } = req.query;
+  
+  const end = endDate ? new Date(endDate) : new Date();
+  const start = startDate ? new Date(startDate) : new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
+  
+  const startStr = start.toISOString().split('T')[0] + ' 00:00:00';
+  const endStr = end.toISOString().split('T')[0] + ' 23:59:59';
+
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        d.id as device_id,
+        d.name as device_name,
+        DATE(sd.created_at) as date,
+        HOUR(sd.created_at) as hour,
+        COUNT(sd.id) as reading_count,
+        AVG(sd.soil) as avg_soil,
+        AVG(sd.temperature) as avg_temperature,
+        AVG(sd.humidity) as avg_humidity,
+        AVG(sd.rssi) as avg_rssi
+      FROM devices d
+      LEFT JOIN sensor_data sd ON d.id = sd.device_id 
+        AND sd.created_at BETWEEN ? AND ?
+      GROUP BY d.id, d.name, DATE(sd.created_at), HOUR(sd.created_at)
+      ORDER BY d.name, date, hour
+    `, [startStr, endStr]);
+
+    const deviceMap = {};
+    rows.forEach(row => {
+      if (!deviceMap[row.device_id]) {
+        deviceMap[row.device_id] = {
+          device_id: row.device_id,
+          device_name: row.device_name,
+          readings: []
+        };
+      }
+      if (row.date) {
+        deviceMap[row.device_id].readings.push({
+          date: row.date,
+          hour: row.hour,
+          reading_count: row.reading_count,
+          avg_soil: row.avg_soil ? parseFloat(row.avg_soil.toFixed(2)) : null,
+          avg_temperature: row.avg_temperature ? parseFloat(row.avg_temperature.toFixed(2)) : null,
+          avg_humidity: row.avg_humidity ? parseFloat(row.avg_humidity.toFixed(2)) : null,
+          avg_rssi: row.avg_rssi ? parseFloat(row.avg_rssi.toFixed(2)) : null
+        });
+      }
+    });
+
+    res.json({ 
+      startDate: start.toISOString().split('T')[0], 
+      endDate: end.toISOString().split('T')[0],
+      devices: Object.values(deviceMap) 
+    });
+  } catch (error) {
+    console.error("Error fetching weekly data:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 /* ================= START ================= */
 app.listen(5000, () => {
   console.log("✅ Backend running on http://localhost:5000");
@@ -300,4 +420,7 @@ app.listen(5000, () => {
   console.log("   PUT  /api/devices/:id/location - Update GPS location");
   console.log("   POST /api/heartbeat/:deviceId - Device heartbeat");
   console.log("   GET  /api/json-data      - Get all data in JSON format");
+  console.log("   --- Reports Endpoints ---");
+  console.log("   GET  /api/reports/daily-summary - Get daily summary report");
+  console.log("   GET  /api/reports/weekly-data   - Get weekly sensor data");
 });

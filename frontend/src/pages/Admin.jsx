@@ -8,6 +8,7 @@ export default function Admin({ token, apiFetch }) {
   const [devices, setDevices] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [stats, setStats] = useState(null);
+  const [userConfigs, setUserConfigs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   
@@ -15,6 +16,11 @@ export default function Admin({ token, apiFetch }) {
   const [editingDevice, setEditingDevice] = useState(null);
   const [editDeviceData, setEditDeviceData] = useState({ name: "", latitude: "", longitude: "", location_name: "" });
   const [savingDevice, setSavingDevice] = useState(false);
+
+  // User config edit state
+  const [editingConfig, setEditingConfig] = useState(null);
+  const [configForm, setConfigForm] = useState({ max_lands: 5, max_sensors_per_land: 10 });
+  const [savingConfig, setSavingConfig] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -24,21 +30,62 @@ export default function Admin({ token, apiFetch }) {
     setLoading(true);
     setError(null);
     try {
-      const [statsRes, usersRes, devicesRes, alertsRes] = await Promise.all([
+      const [statsRes, usersRes, devicesRes, alertsRes, configRes] = await Promise.all([
         apiFetch("http://localhost:5000/api/admin/stats"),
         apiFetch("http://localhost:5000/api/admin/users"),
         apiFetch("http://localhost:5000/api/admin/devices"),
-        apiFetch("http://localhost:5000/api/admin/alerts")
+        apiFetch("http://localhost:5000/api/admin/alerts"),
+        apiFetch("http://localhost:5000/api/admin/users-config")
       ]);
 
       if (statsRes.ok) setStats(await statsRes.json());
       if (usersRes.ok) setUsers(await usersRes.json());
       if (devicesRes.ok) setDevices(await devicesRes.json());
       if (alertsRes.ok) setAlerts(await alertsRes.json());
+      if (configRes.ok) setUserConfigs(await configRes.json());
     } catch (err) {
       setError("Failed to load admin data");
     }
     setLoading(false);
+  };
+
+  const handleEditConfig = (config) => {
+    setEditingConfig(config.id);
+    setConfigForm({
+      max_lands: config.max_lands || 5,
+      max_sensors_per_land: config.max_sensors_per_land || 10
+    });
+  };
+
+  const handleSaveConfig = async (userId) => {
+    setSavingConfig(true);
+    try {
+      const response = await apiFetch(`http://localhost:5000/api/admin/users/${userId}/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(configForm)
+      });
+      
+      if (response.ok) {
+        setUserConfigs(userConfigs.map(u => 
+          u.id === userId 
+            ? { ...u, max_lands: configForm.max_lands, max_sensors_per_land: configForm.max_sensors_per_land }
+            : u
+        ));
+        setEditingConfig(null);
+      } else {
+        const data = await response.json();
+        alert(data.error || "Failed to save configuration");
+      }
+    } catch (err) {
+      alert("Error saving configuration");
+    }
+    setSavingConfig(false);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingConfig(null);
+    setConfigForm({ max_lands: 5, max_sensors_per_land: 10 });
   };
 
   const handleRoleChange = async (userId, newRole) => {
@@ -174,6 +221,12 @@ export default function Admin({ token, apiFetch }) {
           Users ({users.length})
         </button>
         <button 
+          className={`admin-tab ${activeTab === "userConfig" ? "active" : ""}`}
+          onClick={() => setActiveTab("userConfig")}
+        >
+          User Config
+        </button>
+        <button 
           className={`admin-tab ${activeTab === "devices" ? "active" : ""}`}
           onClick={() => setActiveTab("devices")}
         >
@@ -252,6 +305,90 @@ export default function Admin({ token, apiFetch }) {
                       >
                         Delete
                       </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {activeTab === "userConfig" && (
+          <div className="admin-user-config">
+            <p className="config-description">
+              Configure how many lands/farms and sensors each user can have.
+            </p>
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Current Lands</th>
+                  <th>Max Lands</th>
+                  <th>Current Sensors</th>
+                  <th>Max Sensors/Land</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {userConfigs.map(config => (
+                  <tr key={config.id}>
+                    <td>
+                      <strong>{config.username}</strong>
+                      <span className="user-role-badge">{config.role}</span>
+                    </td>
+                    <td>{config.current_lands || 0}</td>
+                    <td>
+                      {editingConfig === config.id ? (
+                        <input
+                          type="number"
+                          min="1"
+                          value={configForm.max_lands}
+                          onChange={(e) => setConfigForm({...configForm, max_lands: parseInt(e.target.value) || 1})}
+                          className="config-input"
+                        />
+                      ) : (
+                        config.max_lands || 5
+                      )}
+                    </td>
+                    <td>{config.current_sensors || 0}</td>
+                    <td>
+                      {editingConfig === config.id ? (
+                        <input
+                          type="number"
+                          min="1"
+                          value={configForm.max_sensors_per_land}
+                          onChange={(e) => setConfigForm({...configForm, max_sensors_per_land: parseInt(e.target.value) || 1})}
+                          className="config-input"
+                        />
+                      ) : (
+                        config.max_sensors_per_land || 10
+                      )}
+                    </td>
+                    <td>
+                      {editingConfig === config.id ? (
+                        <div className="config-actions">
+                          <button 
+                            className="save-btn"
+                            onClick={() => handleSaveConfig(config.id)}
+                            disabled={savingConfig}
+                          >
+                            {savingConfig ? 'Saving...' : 'Save'}
+                          </button>
+                          <button 
+                            className="cancel-btn"
+                            onClick={handleCancelEdit}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button 
+                          className="edit-btn"
+                          onClick={() => handleEditConfig(config)}
+                        >
+                          Edit
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

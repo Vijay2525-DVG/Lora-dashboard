@@ -1,32 +1,27 @@
-# TODO: Admin Portal Implementation
+# TODO: Reports Feature Implementation
 
-## Database Setup
-- [x] 1. Analyze current authentication system
-- [x] 2. Add role column to users table in database (added in server.js ensureSchema)
-- [x] 3. Admin user can be created via database or by existing admin
+## Backend (server.js)
+- [x] 1. Add GET /api/reports/daily-summary - Get daily aggregated sensor data
+- [x] 2. Add GET /api/reports/weekly-data - Get weekly sensor data with hourly/daily aggregation
+- [x] 3. Add GET /api/reports/alerts-history - Get historical alerts
 
-## Backend Updates (server.js)
-- [x] 4. Update JWT to include role in token payload
-- [x] 5. Add admin middleware function
-- [x] 6. Add admin API endpoints:
-  - [x] GET /api/admin/users - List all users
-  - [x] PUT /api/admin/users/:id/role - Change user role
-  - [x] DELETE /api/admin/users/:id - Delete user
-  - [x] GET /api/admin/devices - List all devices
-  - [x] DELETE /api/admin/devices/:id - Delete any device
-  - [x] GET /api/admin/alerts - Get all alerts
-  - [x] GET /api/admin/stats - Get dashboard stats
+## Frontend
+- [x] 4. Install jspdf and jspdf-autotable packages
+- [x] 5. Create Reports.jsx component with:
+      - Daily Summary report view
+      - Weekly Sensor Data report view
+      - Alert Reports view
+      - CSV export functionality
+      - PDF export functionality
+- [x] 6. Add Reports navigation in dashboard header
+- [x] 7. Update App.jsx to include Reports modal
 
-## Frontend Updates
-- [x] 7. Create AdminPanel.jsx component
-- [x] 8. Update App.jsx to:
-  - [x] Store user role from JWT
-  - [x] Add admin navigation button
-  - [x] Show admin panel when clicked
-- [x] 9. Add CSS styling for admin panel
+## Reports Include:
+1. **Daily Summary** - Aggregated daily data (avg/min/max temp, humidity, soil)
+2. **Weekly Sensor Data** - Hourly/daily sensor readings for the week
+3. **Alert Reports** - Historical alerts with timestamps and details
 
-## Testing
-- [ ] 10. Test admin login
-- [ ] 11. Test admin features
-- [ ] 12. Run add_admin_role.sql or restart server to add role column
+## Export Formats:
+- **CSV** - Download sensor data as CSV files
+- **PDF** - Generate formatted PDF reports with charts/tables
 

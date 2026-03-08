@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import StatCard from "./components/statcard";
@@ -9,6 +10,7 @@ import DeviceDetail from "./components/DeviceDetail";
 import AlertPanel from "./components/AlertPanel";
 import AdminPanel from "./components/AdminPanel";
 import Admin from "./pages/Admin";
+import Reports from "./components/Reports";
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -37,12 +39,13 @@ function Dashboard() {
   const [mapRefreshKey, setMapRefreshKey] = useState(0);
   const [newDeviceData, setNewDeviceData] = useState({ name: "", latitude: "", longitude: "", location_name: "" });
   const [addingDevice, setAddingDevice] = useState(false);
-  const [showAlertPanel, setShowAlertPanel] = useState(false);
+const [showAlertPanel, setShowAlertPanel] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
   const [alertLoading, setAlertLoading] = useState(true);
   const [userRole, setUserRole] = useState(localStorage.getItem("userRole") || "");
   const [showPassword, setShowPassword] = useState(false);
   const [alertSettings, setAlertSettings] = useState({});
+  const [showReports, setShowReports] = useState(false);
 
   /* decode token to show username and role */
   useEffect(() => {
@@ -298,8 +301,8 @@ function Dashboard() {
       setAllDeviceData(newData);
     };
 
-    generateDemoData();
-    intervalRef.current = setInterval(generateDemoData, 2000);
+generateDemoData();
+    intervalRef.current = setInterval(generateDemoData, 10000); // Update every 10 seconds to reduce flickering
     
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -769,155 +772,89 @@ function Dashboard() {
 
       {!viewingDeviceDetail && (
         <>
-      <header>
-        <div className="header-left">
-          <h1>LoRa Soil Monitoring</h1>
-          {usernameDisplay && <div className="user-greeting">Hello, {usernameDisplay}</div>}
-          <div className="status-badges">
-            <span className="device-count">{devices.length} Devices</span>
-            <span className="online-count">{onlineDevices} Online</span>
+      <header className="dashboard-header">
+<div className="dashboard-brand">
+          <span className="brand-icon">📡</span>
+          <div className="brand-text">
+            <h1>LoRa Monitor</h1>
+            <span className="brand-tagline">Smart Agriculture</span>
           </div>
         </div>
-        <div className="header-right">
-          {/* Alert Button */}
-          <button className="alert-btn" onClick={async () => {
-            // Refresh alert count before opening
-            try {
-              const response = await apiFetch("http://localhost:5000/api/alerts/active");
-              if (response.ok) {
-                const data = await response.json();
-                setAlertCount(data.length);
-              }
-            } catch (error) {
-              console.error("Error fetching alert count:", error);
-            }
-            setShowAlertPanel(true);
-          }}>
-            🔔 Alerts {!alertLoading && alertCount > 0 && <span className="alert-badge">{alertCount}</span>}
+        
+        <div className="dashboard-nav">
+{/* Demo Mode Button - Always visible in header */}
+          <button 
+            className={`demo-btn ${demoMode ? 'active' : ''}`}
+            onClick={() => setDemoMode(!demoMode)}
+            style={{ marginRight: '10px' }}
+          >
+            {demoMode ? 'Demo: ON' : 'Demo Mode'}
           </button>
-          {/* Time Range Selector */}
-          <div className="time-range-selector">
-            <label>Time Range:</label>
-            <select value={timeRange} onChange={(e) => setTimeRange(e.target.value)}>
-              <option value="1h">Last 1 Hour</option>
-              <option value="6h">Last 6 Hours</option>
-              <option value="24h">Last 24 Hours</option>
-              <option value="7d">Last 7 Days</option>
-              <option value="30d">Last 30 Days</option>
-              <option value="all">All Time</option>
-            </select>
-          </div>
-          <button className="add-device-btn" onClick={() => setShowAddDeviceModal(true)}>
-            Add Device
+          
+          <button 
+            className="add-device-btn" 
+            onClick={() => setShowAddDeviceModal(true)}
+            style={{ marginRight: '10px' }}
+          >
+            + Add Device
           </button>
-          <div className="view-toggle">
-            <button className={`view-btn ${viewMode === "single" ? "active" : ""}`} onClick={() => setViewMode("single")}>
+          
+          <div className="view-toggle" style={{ marginRight: '10px' }}>
+            <button 
+              className={`view-toggle-btn ${viewMode === 'single' ? 'active' : ''}`}
+              onClick={() => setViewMode('single')}
+            >
               Single
             </button>
-            <button className={`view-btn ${viewMode === "all" ? "active" : ""}`} onClick={() => setViewMode("all")}>
+            <button 
+              className={`view-toggle-btn ${viewMode === 'all' ? 'active' : ''}`}
+              onClick={() => setViewMode('all')}
+            >
               All Devices
             </button>
           </div>
-          <button className={`demo-btn ${demoMode ? "active" : ""}`} onClick={() => setDemoMode(!demoMode)}>
-            {demoMode ? "Stop Demo" : "Start Demo"}
-          </button>
-          <button className={`demo-btn ${showMap ? "active" : ""}`} onClick={() => setShowMap(!showMap)}>
-            {showMap ? "Hide Map" : "Show Map"}
-          </button>
+          
+          <select value={selectedDeviceId} onChange={handleDeviceChange} className="device-dropdown">
+            {devices.map(d => (
+              <option key={d.id} value={d.id}>
+                {d.name || d.id}
+              </option>
+            ))}
+          </select>
+          
+          <select value={timeRange} onChange={(e) => setTimeRange(e.target.value)} className="time-dropdown">
+            <option value="1h">Last 1 Hour</option>
+            <option value="6h">Last 6 Hours</option>
+            <option value="24h">Last 24 Hours</option>
+            <option value="7d">Last 7 Days</option>
+            <option value="30d">Last 30 Days</option>
+          </select>
+
           {userRole === "admin" && (
-            <a href="/admin" className="admin-btn">
+            <a href="/admin" className="nav-btn" style={{ marginLeft: '10px' }}>
               Admin
             </a>
           )}
-          <span className={backendOnline ? "online" : "offline"}>
-            {backendOnline ? "ONLINE" : "OFFLINE"}
-          </span>
-          {token && (
-            <button
-              className="demo-btn"
-              onClick={() => {
-                setToken("");
-                localStorage.removeItem("token");
-                // clear state so user must login again
-                setDevices([]);
-              }}
-            >
-              Logout
-            </button>
-          )}
+          
+<button className="nav-btn" onClick={() => setShowAlertPanel(true)} style={{ marginLeft: '10px' }}>
+            Alerts {alertCount > 0 && <span className="nav-badge">{alertCount}</span>}
+          </button>
+          
+          <button className="nav-btn" onClick={() => setShowReports(true)} style={{ marginLeft: '10px' }}>
+            📊 Reports
+          </button>
+          
+          <button className="nav-btn logout-btn" onClick={() => {
+            setToken("");
+            localStorage.removeItem("token");
+            setDevices([]);
+          }}>
+            Logout
+          </button>
+          
+          <span className={`status-dot ${backendOnline ? "online" : "offline"}`} title={backendOnline ? "Connected" : "Disconnected"}></span>
         </div>
       </header>
-
-      {showAddDeviceModal && !addPickMode && (
-        <div className="modal-overlay" onClick={() => { setShowAddDeviceModal(false); setAddPickMode(false); }}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Add New Device</h2>
-              <button className="modal-close" onClick={() => { setShowAddDeviceModal(false); setAddPickMode(false); }}>×</button>
-            </div>
-            <div className="modal-body">
-              <p className="modal-info">
-                A new device will be created: <strong>Device {devices.length + 1}</strong>
-              </p>
-              <div className="form-group">
-                <label>Device Name *</label>
-                <input type="text" placeholder="e.g., Device 1" value={newDeviceData.name}
-                  onChange={(e) => setNewDeviceData({...newDeviceData, name: e.target.value})} required />
-              </div>
-              <div className="form-group">
-                <label>Location Name (Optional)</label>
-                <input type="text" placeholder="e.g., Garden, Farm" value={newDeviceData.location_name}
-                  onChange={(e) => setNewDeviceData({...newDeviceData, location_name: e.target.value})} />
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Latitude</label>
-                  <input type="number" step="any" placeholder="13.0823" value={newDeviceData.latitude}
-                    onChange={(e) => setNewDeviceData({...newDeviceData, latitude: e.target.value})} />
-                </div>
-                <div className="form-group">
-                  <label>Longitude</label>
-                  <input type="number" step="any" placeholder="80.2707" value={newDeviceData.longitude}
-                    onChange={(e) => setNewDeviceData({...newDeviceData, longitude: e.target.value})} />
-                </div>
-              </div>
-              <div className="map-pick-controls">
-                <button
-                  className="pick-map-btn"
-                  onClick={() => {
-                    setAddPickMode(true);
-                    setShowMap(true); // ensure map is visible when picking
-                  }}
-                >
-                  📍 Pick on map
-                </button>
-                <button
-                  className="use-location-btn"
-                  onClick={() => {
-                    if (navigator.geolocation) {
-                      navigator.geolocation.getCurrentPosition(pos => {
-                        setNewDeviceData(prev => ({
-                          ...prev,
-                          latitude: pos.coords.latitude.toString(),
-                          longitude: pos.coords.longitude.toString()
-                        }));
-                      });
-                    }
-                  }}
-                >
-                  📡 Use my location
-                </button>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-cancel" onClick={() => setShowAddDeviceModal(false)}>Cancel</button>
-              <button className="btn-add" onClick={handleAddDevice} disabled={addingDevice}>
-                {addingDevice ? "Adding..." : "Add Device"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {showMap && (
         <GPSMap
@@ -942,130 +879,61 @@ function Dashboard() {
         />
       )}
 
-      {backendOnline && devices.length > 0 && (
-        <div className="device-selector">
-          <label className="device-label">Active Device:</label>
-          <select value={selectedDeviceId} onChange={handleDeviceChange}>
-            {devices.map(d => (
-              <option key={d.id} value={d.id}>
-                {d.name || d.id} {allDeviceData[d.id]?.status === 'online' ? "🟢" : "🔴"}
-              </option>
-            ))}
-          </select>
+      <div className="dashboard-content">
+        {viewMode === 'all' ? (
+          <div className="all-devices-view">
+            <MultiDeviceChart devices={devices} allDeviceData={allDeviceData} />
+          </div>
+        ) : (
+        <>
+{/* Stats Cards - Soil, Temperature, Humidity, RSSI */}
+        <div className="stats-row">
+          <div className="stat-box">
+            <span className="stat-icon">Soil</span>
+            <div className="stat-info">
+              <span className="stat-value">{currentData?.soil || "--"}</span>
+              <span className="stat-label">Moisture</span>
+            </div>
+          </div>
+          <div className="stat-box">
+            <span className="stat-icon">Temp</span>
+            <div className="stat-info">
+              <span className="stat-value">{currentData?.temperature ? `${currentData.temperature}°C` : "--"}</span>
+              <span className="stat-label">Temperature</span>
+            </div>
+          </div>
+          <div className="stat-box">
+            <span className="stat-icon">Hum</span>
+            <div className="stat-info">
+              <span className="stat-value">{currentData?.humidity ? `${currentData.humidity}%` : "--"}</span>
+              <span className="stat-label">Humidity</span>
+            </div>
+          </div>
+          <div className="stat-box">
+            <span className="stat-icon">RSSI</span>
+            <div className="stat-info">
+              <span className="stat-value">{currentData?.rssi || "--"}</span>
+              <span className="stat-label">Signal</span>
+            </div>
+          </div>
         </div>
-      )}
 
-      {viewMode === "all" && (
-        <>
-          <div className="all-devices-grid">
-            {devices.map(device => {
-              const data = allDeviceData[device.id];
-              const isOnline = data?.status === 'online';
-              return (
-                <div key={device.id} className={`device-card ${selectedDeviceId === device.id ? 'selected' : ''}`}
-                  onClick={() => setSelectedDeviceId(device.id)}>
-                  <div className="device-card-header">
-                    <h4>{device.name || device.id}</h4>
-                    <div className="device-header-actions">
-                      <span className={isOnline ? "online" : "offline"} style={{fontSize: '16px'}}>{isOnline ? "●" : "●"}</span>
-                      <button 
-                        className="delete-device-btn" 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteDevice(device.id, device.name || device.id);
-                        }}
-                        title="Delete device"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </div>
-                  {data && isOnline ? (
-                    <div className="device-card-stats">
-                      <div className="stat"><span className="label">Soil</span><span className="value">{data.soil}</span></div>
-                      <div className="stat"><span className="label">Temp</span><span className="value">{data.temperature}°C</span></div>
-                      <div className="stat"><span className="label">Hum</span><span className="value">{data.humidity}%</span></div>
-                      <div className="stat"><span className="label">RSSI</span><span className="value">{data.rssi}</span></div>
-                    </div>
-                  ) : (
-                    <div className="no-data">No data received</div>
-                  )}
-                  <button className="view-device-btn" onClick={(e) => { e.stopPropagation(); setSelectedDeviceId(device.id); setViewMode("single"); }}>
-                    View Details
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-          
-          {/* Multi-Device Charts */}
-          {devices.length > 0 && (
-            <div className="multi-device-charts">
-              <h3 className="charts-section-title">📊 All Devices Comparison</h3>
-              <MultiDeviceChart 
-                title="Soil Moisture - All Devices" 
-                data={deviceHistory} 
-                dataKey="soil" 
-                unit="ADC"
-                alertSettings={alertSettings}
-              />
-              <MultiDeviceChart 
-                title="Temperature - All Devices" 
-                data={deviceHistory} 
-                dataKey="temperature" 
-                unit="°C"
-                alertSettings={alertSettings}
-              />
-              <MultiDeviceChart 
-                title="Humidity - All Devices" 
-                data={deviceHistory} 
-                dataKey="humidity" 
-                unit="%"
-                alertSettings={alertSettings}
-              />
-            </div>
-          )}
+        {/* Charts Section */}
+        <div className="charts-section">
+          <SensorChart title="Soil Moisture" data={history} dataKey="soil" color="#22c55e" unit="ADC" />
+          <SensorChart title="Temperature" data={history} dataKey="temperature" color="#f97316" unit="°C" />
+          <SensorChart title="Humidity" data={history} dataKey="humidity" color="#38bdf8" unit="%" />
+        </div>
         </>
-      )}
+        )}
 
-      {viewMode === "single" && (
-        <>
-          <div className="grid">
-            <StatCard title="Soil" value={currentData?.soil} unit="ADC" onClick={() => setSelectedCard(selectedCard === "Soil" ? null : "Soil")} isSelected={selectedCard === "Soil"} info={getCardInfo("Soil")} />
-            <StatCard title="Temp" value={currentData?.temperature} unit="°C" onClick={() => setSelectedCard(selectedCard === "Temp" ? null : "Temp")} isSelected={selectedCard === "Temp"} info={getCardInfo("Temp")} />
-            <StatCard title="Humidity" value={currentData?.humidity} unit="%" onClick={() => setSelectedCard(selectedCard === "Humidity" ? null : "Humidity")} isSelected={selectedCard === "Humidity"} info={getCardInfo("Humidity")} />
-            <StatCard title="RSSI" value={currentData?.rssi} unit="dBm" onClick={() => setSelectedCard(selectedCard === "RSSI" ? null : "RSSI")} isSelected={selectedCard === "RSSI"} info={getCardInfo("RSSI")} />
-          </div>
+        <div className="data-section">
+          <h3 className="section-title">Recent Readings</h3>
+          <DataTable data={fullHistory.length > 0 ? fullHistory : history} showFull={false} />
+        </div>
+      </div>
 
-          {selectedCard && (
-            <div className="card-info-panel">
-              <h3>{selectedCard} Details</h3>
-              <p><strong>Description:</strong> {getCardInfo(selectedCard).description}</p>
-              <p><strong>Range:</strong> {getCardInfo(selectedCard).range}</p>
-              <p><strong>Tip:</strong> {getCardInfo(selectedCard).tips}</p>
-            </div>
-          )}
-
-          {/* Time Range Info */}
-          <div className="time-range-info">
-            <span>📊 Showing data for: <strong>{timeRange === '1h' ? 'Last 1 Hour' : timeRange === '6h' ? 'Last 6 Hours' : timeRange === '24h' ? 'Last 24 Hours' : timeRange === '7d' ? 'Last 7 Days' : timeRange === '30d' ? 'Last 30 Days' : 'All Time'}</strong></span>
-            <span className="data-count">({fullHistory.length} readings)</span>
-          </div>
-
-          <div className="charts">
-            <SensorChart title="Soil Moisture" data={history} dataKey="soil" color="#22c55e" unit="ADC" />
-            <SensorChart title="Temperature" data={history} dataKey="temperature" color="#f97316" unit="°C" />
-            <SensorChart title="Humidity" data={history} dataKey="humidity" color="#38bdf8" unit="%" />
-          </div>
-
-          {/* show full history if loaded, otherwise recent readings */}
-          <DataTable data={fullHistory.length > 0 ? fullHistory : history} showFull={fullHistory.length > 0} />
-        </>
-      )}
-      </>
-      )}
-
-      {/* Alert Panel Modal */}
+{/* Alert Panel Modal */}
       {showAlertPanel && (
         <div className="modal-overlay" onClick={() => setShowAlertPanel(false)}>
           <div className="alert-modal-content" onClick={(e) => e.stopPropagation()}>
@@ -1075,6 +943,62 @@ function Dashboard() {
             />
           </div>
         </div>
+      )}
+
+      {/* Reports Modal */}
+      {showReports && (
+        <div className="modal-overlay" onClick={() => setShowReports(false)}>
+          <div className="reports-modal-content" onClick={(e) => e.stopPropagation()}>
+            <Reports 
+              token={token} 
+              onBack={() => setShowReports(false)} 
+            />
+          </div>
+        </div>
+      )}
+      
+      {/* Add Device Modal */}
+      {showAddDeviceModal && (
+        <div className="modal-overlay" onClick={() => { setShowAddDeviceModal(false); setAddPickMode(false); }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Add New Device</h2>
+              <button className="modal-close" onClick={() => { setShowAddDeviceModal(false); setAddPickMode(false); }}>×</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label>Device Name *</label>
+                <input type="text" placeholder="e.g., Sensor 1" value={newDeviceData.name}
+                  onChange={(e) => setNewDeviceData({...newDeviceData, name: e.target.value})} required />
+              </div>
+              <div className="form-group">
+                <label>Location</label>
+                <input type="text" placeholder="e.g., Greenhouse" value={newDeviceData.location_name}
+                  onChange={(e) => setNewDeviceData({...newDeviceData, location_name: e.target.value})} />
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Latitude</label>
+                  <input type="number" step="any" placeholder="13.0823" value={newDeviceData.latitude}
+                    onChange={(e) => setNewDeviceData({...newDeviceData, latitude: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label>Longitude</label>
+                  <input type="number" step="any" placeholder="80.2707" value={newDeviceData.longitude}
+                    onChange={(e) => setNewDeviceData({...newDeviceData, longitude: e.target.value})} />
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-cancel" onClick={() => setShowAddDeviceModal(false)}>Cancel</button>
+              <button className="btn-add" onClick={handleAddDevice} disabled={addingDevice}>
+                {addingDevice ? "Adding..." : "Add Device"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      </>
       )}
     </div>
   );
@@ -1113,3 +1037,4 @@ export default function App() {
     </BrowserRouter>
   );
 }
+

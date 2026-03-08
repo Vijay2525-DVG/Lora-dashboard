@@ -456,20 +456,21 @@ app.get("/api/all-devices-data", authenticateToken, async (req, res) => {
 
 /* ================= INSERT DATA (FROM LORA / POSTMAN) ================= */
 app.post("/api/data", async (req, res) => {
-  const { device_id, soil, temperature, humidity, rssi } = req.body;
+  const { device_id, soil, temperature, humidity, rssi, battery } = req.body;
 
   const devId = device_id || "NODE_01";
   const soilVal = typeof soil === 'number' ? soil : parseInt(soil) || 0;
   const tempVal = typeof temperature === 'number' ? temperature : parseFloat(temperature) || 0;
   const humVal = typeof humidity === 'number' ? humidity : parseFloat(humidity) || 0;
   const rssiVal = typeof rssi === 'number' ? rssi : parseInt(rssi) || -100;
+  const batteryVal = typeof battery === 'number' ? battery : parseFloat(battery) || null;
 
   try {
     // Insert sensor data into database
     await db.query(
-      `INSERT INTO sensor_data (device_id, soil, temperature, humidity, rssi)
-       VALUES (?, ?, ?, ?, ?)`,
-      [devId, soilVal, tempVal, humVal, rssiVal]
+      `INSERT INTO sensor_data (device_id, soil, temperature, humidity, rssi, battery)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [devId, soilVal, tempVal, humVal, rssiVal, batteryVal]
     );
 
     // Update device status to online  
@@ -1066,18 +1067,428 @@ app.get("/api/admin/stats", authenticateToken, requireAdmin, async (req, res) =>
     const [userCount] = await db.query("SELECT COUNT(*) as count FROM users");
     const [deviceCount] = await db.query("SELECT COUNT(*) as count FROM devices");
     const [onlineDeviceCount] = await db.query("SELECT COUNT(*) as count FROM devices WHERE status = 'online'");
+    const [offlineDeviceCount] = await db.query("SELECT COUNT(*) as count FROM devices WHERE status = 'offline'");
     const [totalReadings] = await db.query("SELECT COUNT(*) as count FROM sensor_data");
     const [recentReadings] = await db.query("SELECT COUNT(*) as count FROM sensor_data WHERE created_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)");
+    const [todayReadings] = await db.query("SELECT COUNT(*) as count FROM sensor_data WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)");
+    const [alertCount] = await db.query("SELECT COUNT(*) as count FROM alert_settings");
     
     res.json({
       totalUsers: userCount[0].count,
       totalDevices: deviceCount[0].count,
       onlineDevices: onlineDeviceCount[0].count,
+      offlineDevices: offlineDeviceCount[0].count,
       totalReadings: totalReadings[0].count,
-      recentReadings: recentReadings[0].count
+      recentReadings: recentReadings[0].count,
+      todayReadings: todayReadings[0].count,
+      alertsTriggered: alertCount[0].count
     });
   } catch (error) {
     console.error("Error fetching admin stats:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get admin dashboard chart data
+app.get("/api/admin/stats/chart", authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const range = req.query.range || '24h';
+    let timeCondition = '';
+    
+    switch(range) {
+      case '1h': timeCondition = 'AND created_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)'; break;
+      case '6h': timeCondition = 'AND created_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)'; break;
+      case '24h': timeCondition = 'AND created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)'; break;
+      case '7d': timeCondition = 'AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)'; break;
+      default: timeCondition = 'AND created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)';
+    }
+
+    const [rows] = await db.query(`
+      SELECT 
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:00:00') as hour,
+        AVG(temperature) as avg_temp,
+        AVG(humidity) as avg_humidity,
+        COUNT(*) as readings
+      FROM sensor_data
+      WHERE (temperature IS NOT NULL OR humidity IS NOT NULL)
+      ${timeCondition}
+      GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d %H')
+      ORDER BY hour ASC
+      LIMIT 50
+    `);
+
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching chart data:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get all users with their config (admin only)
+app.get("/api/admin/users-config", authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        u.id, 
+        u.username, 
+        u.role, 
+        u.created_at,
+        uc.max_lands,
+        uc.max_sensors_per_land,
+        (SELECT COUNT(*) FROM lands WHERE user_id = u.id) as current_lands,
+        (SELECT COUNT(*) FROM devices WHERE user_id = u.id) as current_sensors
+      FROM users u
+      LEFT JOIN user_config uc ON u.id = uc.user_id
+      ORDER BY u.id
+    `);
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching users config:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get specific user config (admin only)
+app.get("/api/admin/users/:id/config", authenticateToken, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        u.id, 
+        u.username,
+        uc.max_lands,
+        uc.max_sensors_per_land,
+        (SELECT COUNT(*) FROM lands WHERE user_id = u.id) as current_lands,
+        (SELECT COUNT(*) FROM devices WHERE user_id = u.id) as current_sensors
+      FROM users u
+      LEFT JOIN user_config uc ON u.id = uc.user_id
+      WHERE u.id = ?
+    `, [id]);
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    
+    res.json(rows[0]);
+  } catch (error) {
+    console.error("Error fetching user config:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update user config (admin only)
+app.put("/api/admin/users/:id/config", authenticateToken, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { max_lands, max_sensors_per_land } = req.body;
+  
+  if (max_lands !== undefined && (isNaN(max_lands) || max_lands < 1)) {
+    return res.status(400).json({ error: "max_lands must be a positive number" });
+  }
+  if (max_sensors_per_land !== undefined && (isNaN(max_sensors_per_land) || max_sensors_per_land < 1)) {
+    return res.status(400).json({ error: "max_sensors_per_land must be a positive number" });
+  }
+
+  try {
+    // Check if user exists
+    const [users] = await db.query("SELECT id FROM users WHERE id = ?", [id]);
+    if (users.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Insert or update user config
+    await db.query(`
+      INSERT INTO user_config (user_id, max_lands, max_sensors_per_land)
+      VALUES (?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        max_lands = VALUES(max_lands),
+        max_sensors_per_land = VALUES(max_sensors_per_land)
+    `, [id, max_lands || 5, max_sensors_per_land || 10]);
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error updating user config:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/* ================= REPORTS API ================= */
+
+// Get daily summary report - aggregated data for each device
+app.get("/api/reports/daily-summary", authenticateToken, async (req, res) => {
+  const { date } = req.query; // Format: YYYY-MM-DD, defaults to today
+  
+  const targetDate = date || new Date().toISOString().split('T')[0];
+  const startOfDay = `${targetDate} 00:00:00`;
+  const endOfDay = `${targetDate} 23:59:59`;
+
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        d.id as device_id,
+        d.name as device_name,
+        d.location_name,
+        COUNT(sd.id) as reading_count,
+        AVG(sd.soil) as avg_soil,
+        MIN(sd.soil) as min_soil,
+        MAX(sd.soil) as max_soil,
+        AVG(sd.temperature) as avg_temperature,
+        MIN(sd.temperature) as min_temperature,
+        MAX(sd.temperature) as max_temperature,
+        AVG(sd.humidity) as avg_humidity,
+        MIN(sd.humidity) as min_humidity,
+        MAX(sd.humidity) as max_humidity,
+        AVG(sd.rssi) as avg_rssi,
+        MAX(sd.battery) as max_battery
+      FROM devices d
+      LEFT JOIN sensor_data sd ON d.id = sd.device_id 
+        AND sd.created_at BETWEEN ? AND ?
+      WHERE d.user_id = ?
+      GROUP BY d.id, d.name, d.location_name
+      ORDER BY d.name
+    `, [startOfDay, endOfDay, req.user.id]);
+
+    // Parse decimal values
+    const results = rows.map(row => ({
+      device_id: row.device_id,
+      device_name: row.device_name,
+      location_name: row.location_name,
+      reading_count: row.reading_count,
+      avg_soil: row.avg_soil ? parseFloat(row.avg_soil.toFixed(2)) : null,
+      min_soil: row.min_soil,
+      max_soil: row.max_soil,
+      avg_temperature: row.avg_temperature ? parseFloat(row.avg_temperature.toFixed(2)) : null,
+      min_temperature: row.min_temperature,
+      max_temperature: row.max_temperature,
+      avg_humidity: row.avg_humidity ? parseFloat(row.avg_humidity.toFixed(2)) : null,
+      min_humidity: row.min_humidity,
+      max_humidity: row.max_humidity,
+      avg_rssi: row.avg_rssi ? parseFloat(row.avg_rssi.toFixed(2)) : null,
+      max_battery: row.max_battery
+    }));
+
+    res.json({ date: targetDate, devices: results });
+  } catch (error) {
+    console.error("Error fetching daily summary:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get weekly sensor data - hourly aggregated data for the week
+app.get("/api/reports/weekly-data", authenticateToken, async (req, res) => {
+  const { startDate, endDate } = req.query;
+  
+  const end = endDate ? new Date(endDate) : new Date();
+  const start = startDate ? new Date(startDate) : new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
+  
+  const startStr = start.toISOString().split('T')[0] + ' 00:00:00';
+  const endStr = end.toISOString().split('T')[0] + ' 23:59:59';
+
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        d.id as device_id,
+        d.name as device_name,
+        DATE(sd.created_at) as date,
+        HOUR(sd.created_at) as hour,
+        COUNT(sd.id) as reading_count,
+        AVG(sd.soil) as avg_soil,
+        AVG(sd.temperature) as avg_temperature,
+        AVG(sd.humidity) as avg_humidity,
+        AVG(sd.rssi) as avg_rssi
+      FROM devices d
+      LEFT JOIN sensor_data sd ON d.id = sd.device_id 
+        AND sd.created_at BETWEEN ? AND ?
+      WHERE d.user_id = ?
+      GROUP BY d.id, d.name, DATE(sd.created_at), HOUR(sd.created_at)
+      ORDER BY d.name, date, hour
+    `, [startStr, endStr, req.user.id]);
+
+    // Group by device
+    const deviceMap = {};
+    rows.forEach(row => {
+      if (!deviceMap[row.device_id]) {
+        deviceMap[row.device_id] = {
+          device_id: row.device_id,
+          device_name: row.device_name,
+          readings: []
+        };
+      }
+      if (row.date) {
+        deviceMap[row.device_id].readings.push({
+          date: row.date,
+          hour: row.hour,
+          reading_count: row.reading_count,
+          avg_soil: row.avg_soil ? parseFloat(row.avg_soil.toFixed(2)) : null,
+          avg_temperature: row.avg_temperature ? parseFloat(row.avg_temperature.toFixed(2)) : null,
+          avg_humidity: row.avg_humidity ? parseFloat(row.avg_humidity.toFixed(2)) : null,
+          avg_rssi: row.avg_rssi ? parseFloat(row.avg_rssi.toFixed(2)) : null
+        });
+      }
+    });
+
+    res.json({ 
+      startDate: start.toISOString().split('T')[0], 
+      endDate: end.toISOString().split('T')[0],
+      devices: Object.values(deviceMap) 
+    });
+  } catch (error) {
+    console.error("Error fetching weekly data:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get alert history report
+app.get("/api/reports/alerts-history", authenticateToken, async (req, res) => {
+  const { startDate, endDate, deviceId, limit } = req.query;
+  
+  const end = endDate ? new Date(endDate) : new Date();
+  const start = startDate ? new Date(startDate) : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const maxLimit = Math.min(parseInt(limit) || 100, 1000);
+
+  const startStr = start.toISOString().split('T')[0] + ' 00:00:00';
+  const endStr = end.toISOString().split('T')[0] + ' 23:59:59';
+
+  try {
+    // Get all devices with their latest data within the date range
+    const [devices] = await db.query(`
+      SELECT d.id as device_id, d.name as device_name, d.user_id,
+             sd.soil, sd.temperature, sd.humidity, sd.created_at as data_timestamp
+      FROM devices d
+      LEFT JOIN sensor_data sd ON d.id = sd.device_id 
+        AND sd.created_at BETWEEN ? AND ?
+      WHERE d.user_id = ?
+      ${deviceId ? 'AND d.id = ?' : ''}
+      ORDER BY sd.created_at DESC
+      LIMIT ?
+    `, deviceId ? [startStr, endStr, req.user.id, deviceId, maxLimit] : [startStr, endStr, req.user.id, maxLimit]);
+
+    // Get alert settings
+    const [alertSettings] = await db.query(
+      "SELECT * FROM alert_settings WHERE user_id = ?",
+      [req.user.id]
+    );
+
+    const alerts = [];
+    const now = new Date();
+
+    // Check each device data point against thresholds
+    devices.forEach(device => {
+      if (!device.data_timestamp) return;
+      
+      const settings = alertSettings.find(s => s.device_id === device.id);
+      if (!settings) return;
+
+      const dataTime = new Date(device.data_timestamp);
+
+      // Check temperature thresholds
+      if (device.temperature !== null) {
+        if (settings.max_temp && device.temperature > settings.max_temp) {
+          alerts.push({
+            id: alerts.length + 1,
+            device_id: device.id,
+            device_name: device.device_name,
+            type: 'temperature_high',
+            severity: 'critical',
+            value: device.temperature,
+            threshold: settings.max_temp,
+            unit: '°C',
+            message: `Temperature too high: ${device.temperature}°C (max: ${settings.max_temp}°C)`,
+            timestamp: device.data_timestamp
+          });
+        }
+        if (settings.min_temp && device.temperature < settings.min_temp) {
+          alerts.push({
+            id: alerts.length + 1,
+            device_id: device.id,
+            device_name: device.device_name,
+            type: 'temperature_low',
+            severity: 'warning',
+            value: device.temperature,
+            threshold: settings.min_temp,
+            unit: '°C',
+            message: `Temperature too low: ${device.temperature}°C (min: ${settings.min_temp}°C)`,
+            timestamp: device.data_timestamp
+          });
+        }
+      }
+
+      // Check humidity thresholds
+      if (device.humidity !== null) {
+        if (settings.max_humidity && device.humidity > settings.max_humidity) {
+          alerts.push({
+            id: alerts.length + 1,
+            device_id: device.id,
+            device_name: device.device_name,
+            type: 'humidity_high',
+            severity: 'warning',
+            value: device.humidity,
+            threshold: settings.max_humidity,
+            unit: '%',
+            message: `Humidity too high: ${device.humidity}% (max: ${settings.max_humidity}%)`,
+            timestamp: device.data_timestamp
+          });
+        }
+        if (settings.min_humidity && device.humidity < settings.min_humidity) {
+          alerts.push({
+            id: alerts.length + 1,
+            device_id: device.id,
+            device_name: device.device_name,
+            type: 'humidity_low',
+            severity: 'warning',
+            value: device.humidity,
+            threshold: settings.min_humidity,
+            unit: '%',
+            message: `Humidity too low: ${device.humidity}% (min: ${settings.min_humidity}%)`,
+            timestamp: device.data_timestamp
+          });
+        }
+      }
+
+      // Check soil moisture thresholds
+      if (device.soil !== null) {
+        if (settings.min_soil && device.soil < settings.min_soil) {
+          alerts.push({
+            id: alerts.length + 1,
+            device_id: device.id,
+            device_name: device.device_name,
+            type: 'soil_low',
+            severity: 'info',
+            value: device.soil,
+            threshold: settings.min_soil,
+            unit: 'ADC',
+            message: `Soil moisture LOW (${device.soil} ADC, min: ${settings.min_soil})`,
+            timestamp: device.data_timestamp
+          });
+        }
+        if (settings.max_soil && device.soil > settings.max_soil) {
+          alerts.push({
+            id: alerts.length + 1,
+            device_id: device.id,
+            device_name: device.device_name,
+            type: 'soil_high',
+            severity: 'info',
+            value: device.soil,
+            threshold: settings.max_soil,
+            unit: 'ADC',
+            message: `Soil moisture HIGH (${device.soil} ADC, max: ${settings.max_soil})`,
+            timestamp: device.data_timestamp
+          });
+        }
+      }
+    });
+
+    // Sort by timestamp descending
+    alerts.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    res.json({ 
+      startDate: start.toISOString().split('T')[0], 
+      endDate: end.toISOString().split('T')[0],
+      totalAlerts: alerts.length,
+      alerts: alerts.slice(0, maxLimit)
+    });
+  } catch (error) {
+    console.error("Error fetching alerts history:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1098,6 +1509,10 @@ app.listen(5000, () => {
   console.log("   POST /api/data            - Submit sensor data (public)");
   console.log("   PUT  /api/devices/:id/location - Update GPS location (auth)");
   console.log("   POST /api/heartbeat/:deviceId - Device heartbeat (public)");
+  console.log("   --- Reports Endpoints ---");
+  console.log("   GET  /api/reports/daily-summary - Get daily summary report (auth)");
+  console.log("   GET  /api/reports/weekly-data   - Get weekly sensor data (auth)");
+  console.log("   GET  /api/reports/alerts-history - Get alerts history (auth)");
   console.log("   --- Admin Endpoints ---");
   console.log("   GET  /api/admin/users     - List all users (admin)");
   console.log("   PUT  /api/admin/users/:id/role - Change user role (admin)");
