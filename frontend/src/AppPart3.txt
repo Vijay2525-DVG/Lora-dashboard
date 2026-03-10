@@ -1,0 +1,366 @@
+const PageAlerts = ({ state }) => {
+  const sevColor = s => s === "high" ? C.red : s === "medium" ? C.amber : C.blue;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Alerts & Notifications</h1>
+          <p style={{ color: C.textMuted, fontSize: 13, margin: "4px 0 0" }}>System alerts triggered by sensor threshold violations</p>
+        </div>
+        <Badge label={`${ALERTS_INIT.filter(a => a.severity === "high").length} CRITICAL`} color={C.red} />
+      </div>
+      {ALERTS_INIT.map(a => (
+        <div key={a.id} style={{ background: C.card, border: `1px solid ${sevColor(a.severity)}33`, borderLeft: `3px solid ${sevColor(a.severity)}`, borderRadius: 10, padding: "14px 18px", display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <div style={{ marginTop: 2 }}><Icon name="alerts" size={18} color={sevColor(a.severity)} /></div>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ color: sevColor(a.severity), fontWeight: 700, fontSize: 14 }}>{a.type}</div>
+            <div style={{ color: C.textMuted, fontSize: 12, marginTop: 3 }}>Device: <span style={{ color: C.green, fontFamily: "monospace" }}>{a.nodeId}</span> · Value: <span style={{ color: C.text }}>{a.value}</span> · Threshold: <span style={{ color: C.textMuted }}>{a.threshold}</span></div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+            <Badge label={a.severity.toUpperCase()} color={sevColor(a.severity)} />
+            <span style={{ color: C.textSub, fontSize: 11, fontFamily: "monospace" }}>{a.time}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const PageAnalytics = ({ state }) => {
+  const [filter, setFilter] = useState("24h");
+  const filters = ["1h", "24h", "7d", "30d"];
+  const cnt = { "1h": 12, "24h": 48, "7d": 168, "30d": 720 };
+  const histLen = Math.min(cnt[filter], state.history.temp.length);
+
+  const tempData = state.history.temp.slice(-histLen);
+  const moistureData = state.history.moisture.slice(-histLen);
+  const humidityData = state.history.humidity.slice(-histLen);
+  const lightData = state.history.light.slice(-histLen);
+
+  const Chart4 = ({ data, color, label, unit }) => (
+    <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "16px 14px" }}>
+      <div style={{ color: C.textMuted, fontSize: 11, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>{label}</div>
+      <ResponsiveContainer width="100%" height={140}>
+        <AreaChart data={data}>
+          <defs><linearGradient id={`cg${color.replace("#","")}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor={color} stopOpacity={0.25}/>
+            <stop offset="95%" stopColor={color} stopOpacity={0}/>
+          </linearGradient></defs>
+          <CartesianGrid stroke={C.cardBorder} strokeDasharray="3 3" />
+          <XAxis dataKey="time" tick={{ fill: C.textSub, fontSize: 10 }} interval={Math.floor(data.length / 4)} />
+          <YAxis tick={{ fill: C.textSub, fontSize: 10 }} />
+          <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 6, color: C.text, fontSize: 12 }} formatter={v => [`${v.toFixed(1)} ${unit}`, label]} />
+          <Area type="monotone" dataKey="value" stroke={color} strokeWidth={2} fill={`url(#cg${color.replace("#","")})`} dot={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+        <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Analytics</h1>
+        <div style={{ display: "flex", gap: 6 }}>
+          {filters.map(f => (
+            <button key={f} onClick={() => setFilter(f)}
+              style={{ background: filter === f ? C.green + "33" : "transparent", border: `1px solid ${filter === f ? C.green : C.cardBorder}`, borderRadius: 6, padding: "5px 12px", color: filter === f ? C.green : C.textMuted, fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
+              {f === "1h" ? "Last Hour" : f === "24h" ? "24 Hours" : f === "7d" ? "7 Days" : "30 Days"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16 }}>
+        <Chart4 data={tempData} color={C.amber} label="Temperature" unit="°C" />
+        <Chart4 data={moistureData} color={C.green} label="Soil Moisture" unit="%" />
+        <Chart4 data={humidityData} color={C.blue} label="Humidity" unit="%" />
+        <Chart4 data={lightData} color="#a78bfa" label="Light Intensity" unit="lux" />
+      </div>
+    </div>
+  );
+};
+
+const PageDataLogs = ({ state }) => {
+  const rows = Array.from({ length: 20 }, (_, i) => ({
+    time: new Date(Date.now() - i * 15 * 60000).toLocaleTimeString(),
+    node: `NODE-0${(i % 5) + 1}`,
+    temp: (28 + Math.random() * 5).toFixed(1),
+    humidity: (60 + Math.random() * 15).toFixed(1),
+    moisture: (22 + Math.random() * 20).toFixed(1),
+    light: Math.round(2800 + Math.random() * 1200),
+  }));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Data Logs</h1>
+          <p style={{ color: C.textMuted, fontSize: 13, margin: "4px 0 0" }}>Historical sensor readings · {rows.length} records</p>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn label="Export CSV" icon="download" color={C.green} />
+          <Btn label="Export PDF" icon="download" color={C.blue} />
+        </div>
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+              {["Timestamp", "Node ID", "Temp (°C)", "Humidity (%)", "Moisture (%)", "Light (lux)"].map(h => (
+                <th key={h} style={{ color: C.textSub, fontSize: 11, letterSpacing: 1, textAlign: "left", padding: "10px 14px", fontWeight: 700, textTransform: "uppercase" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} style={{ borderBottom: `1px solid ${C.cardBorder}88`, background: i % 2 === 0 ? "transparent" : C.card + "55" }}>
+                <td style={{ padding: "10px 14px", color: C.textMuted, fontFamily: "monospace", fontSize: 11 }}>{r.time}</td>
+                <td style={{ padding: "10px 14px", color: C.green, fontFamily: "monospace", fontWeight: 700 }}>{r.node}</td>
+                <td style={{ padding: "10px 14px", color: C.amber }}>{r.temp}</td>
+                <td style={{ padding: "10px 14px", color: C.blue }}>{r.humidity}</td>
+                <td style={{ padding: "10px 14px", color: C.green }}>{r.moisture}</td>
+                <td style={{ padding: "10px 14px", color: "#a78bfa" }}>{r.light}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+const PageDeviceStatus = ({ state }) => (
+  <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+    <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Device Status</h1>
+    <p style={{ color: C.textMuted, fontSize: 13, margin: "-12px 0 0" }}>Health monitoring for all LoRa sensor nodes</p>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
+      {state.nodes.map((n, i) => (
+        <div key={n.id} style={{ background: C.card, border: `1px solid ${n.online ? C.green + "33" : C.red + "33"}`, borderRadius: 12, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ color: C.green, fontWeight: 700, fontFamily: "monospace", fontSize: 14 }}>{n.id}</span>
+            <StatusDot online={n.online} />
+          </div>
+          <div style={{ fontSize: 12, color: C.textMuted }}>{NODES_INIT[i]?.name}</div>
+          <hr style={{ border: "none", borderTop: `1px solid ${C.cardBorder}` }} />
+          {/* Battery */}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <span style={{ color: C.textSub, fontSize: 11, letterSpacing: 1, textTransform: "uppercase" }}>Battery</span>
+              <span style={{ color: n.battery > 50 ? C.green : n.battery > 25 ? C.amber : C.red, fontWeight: 700, fontSize: 12, fontFamily: "monospace" }}>{n.battery}%</span>
+            </div>
+            <div style={{ height: 6, background: C.surface, borderRadius: 3, overflow: "hidden" }}>
+              <div style={{ width: `${n.battery}%`, height: "100%", background: n.battery > 50 ? C.green : n.battery > 25 ? C.amber : C.red, borderRadius: 3 }} />
+            </div>
+          </div>
+          {/* Signal */}
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ color: C.textSub, fontSize: 11, textTransform: "uppercase", letterSpacing: 1 }}>Signal (RSSI)</span>
+            <span style={{ color: C.blue, fontFamily: "monospace", fontSize: 12, fontWeight: 700 }}>{n.signal} dBm</span>
+          </div>
+          <div style={{ color: C.textSub, fontSize: 11 }}>Last data: {new Date(Date.now() - i * 4 * 60000).toLocaleTimeString()}</div>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+const PageSystemLogs = () => {
+  const typeColor = t => t === "pump" ? C.green : t === "alert" ? C.red : t === "manual" ? C.amber : t === "connect" ? C.blue : C.textMuted;
+  const typeIcon = t => t === "pump" ? "pump" : t === "alert" ? "alerts" : t === "manual" ? "settings" : t === "connect" ? "sensors" : "syslog";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>System Logs</h1>
+      <p style={{ color: C.textMuted, fontSize: 13, margin: "-12px 0 0" }}>Chronological log of all system events</p>
+      <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
+        {LOGS_INIT.map((l, i) => (
+          <div key={i} style={{ display: "flex", gap: 14, padding: "12px 18px", borderBottom: `1px solid ${C.cardBorder}`, alignItems: "flex-start", background: i % 2 === 0 ? "transparent" : C.surface + "55" }}>
+            <Icon name={typeIcon(l.type)} size={15} color={typeColor(l.type)} />
+            <span style={{ color: C.textSub, fontFamily: "monospace", fontSize: 11, minWidth: 72 }}>{l.time}</span>
+            <span style={{ color: C.text, fontSize: 13, flex: 1 }}>{l.event}</span>
+            <Badge label={l.type.toUpperCase()} color={typeColor(l.type)} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const PageSettings = ({ state, dispatch }) => {
+  const [name, setName] = useState("Green Valley Farm");
+  const [email, setEmail] = useState("admin@krishisetu.in");
+  const [interval, setInterval] = useState("30");
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 22, maxWidth: 600 }}>
+      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Settings</h1>
+      {[
+        { title: "Farm Details", fields: [{ label: "Farm Name", val: name, set: setName, type: "text" }, { label: "Admin Email", val: email, set: setEmail, type: "email" }] },
+        { title: "Data Sync", fields: [{ label: "Sensor Poll Interval (sec)", val: interval, set: setInterval, type: "number" }] },
+      ].map(section => (
+        <div key={section.title} style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "20px 22px" }}>
+          <h3 style={{ color: C.text, fontSize: 14, fontWeight: 700, margin: "0 0 16px", letterSpacing: 1, textTransform: "uppercase" }}>{section.title}</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {section.fields.map(f => (
+              <div key={f.label}>
+                <label style={{ color: C.textMuted, fontSize: 11, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 6 }}>{f.label}</label>
+                <input type={f.type} value={f.val} onChange={e => f.set(e.target.value)}
+                  style={{ width: "100%", background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 6, padding: "8px 12px", color: C.text, fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      <Btn label="Save Settings" color={C.green} icon="settings" />
+    </div>
+  );
+};
+
+// ─── App State ──────────────────────────────────────────────────────────────
+const initState = () => ({
+  sensors: { temp: 29.4, moisture: 34.2, humidity: 67.5, light: 4200 },
+  pump: false,
+  lights: false,
+  autoMode: true,
+  minMoisture: 25,
+  maxMoisture: 65,
+  nodes: NODES_INIT.map(n => ({ ...n, online: n.id !== "NODE-04" })),
+  history: {
+    temp: generateHistory(29, 4),
+    moisture: generateHistory(35, 10),
+    humidity: generateHistory(65, 15),
+    light: generateHistory(4000, 800),
+  },
+  alerts: ALERTS_INIT,
+});
+
+const reducer = (state, action) => {
+  switch (action.type) {
+    case "SET_PUMP": return { ...state, pump: action.val };
+    case "SET_LIGHTS": return { ...state, lights: action.val };
+    case "TOGGLE_AUTO": return { ...state, autoMode: !state.autoMode };
+    case "SET_THRESHOLDS": return { ...state, minMoisture: action.min, maxMoisture: action.max };
+    case "TICK": {
+      const newTemp = Math.max(20, Math.min(45, state.sensors.temp + (Math.random() - 0.5) * 0.6));
+      const newMoisture = Math.max(5, Math.min(95, state.sensors.moisture + (Math.random() - 0.5) * 1.2 + (state.pump ? 0.5 : -0.1)));
+      const newHumidity = Math.max(30, Math.min(95, state.sensors.humidity + (Math.random() - 0.5) * 0.8));
+      const newLight = Math.max(0, Math.min(8000, state.sensors.light + (Math.random() - 0.5) * 200));
+
+      let pumpState = state.pump;
+      if (state.autoMode) {
+        if (newMoisture < state.minMoisture) pumpState = true;
+        if (newMoisture > state.maxMoisture) pumpState = false;
+      }
+
+      const addPoint = (arr, val) => [...arr.slice(-199), { time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), value: val }];
+
+      return {
+        ...state,
+        pump: pumpState,
+        sensors: { temp: newTemp, moisture: newMoisture, humidity: newHumidity, light: newLight },
+        history: {
+          temp: addPoint(state.history.temp, newTemp),
+          moisture: addPoint(state.history.moisture, newMoisture),
+          humidity: addPoint(state.history.humidity, newHumidity),
+          light: addPoint(state.history.light, newLight),
+        },
+      };
+    }
+    default: return state;
+  }
+};
+
+// ─── Root App ────────────────────────────────────────────────────────────────
+const NAV = [
+  { id: "dashboard", icon: "dashboard", label: "Dashboard" },
+  { id: "sensors", icon: "sensors", label: "Sensors" },
+  { id: "irrigation", icon: "irrigation", label: "Irrigation Control" },
+  { id: "pump", icon: "pump", label: "Pump & Lighting" },
+  { id: "map", icon: "map", label: "Farm Map" },
+  { id: "alerts", icon: "alerts", label: "Alerts" },
+  { id: "analytics", icon: "analytics", label: "Analytics" },
+  { id: "logs", icon: "logs", label: "Data Logs" },
+  { id: "device", icon: "device", label: "Device Status" },
+  { id: "syslog", icon: "syslog", label: "System Logs" },
+  { id: "settings", icon: "settings", label: "Settings" },
+];
+
+export default function App() {
+  const [page, setPage] = useState("dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [state, dispatch] = useState(initState());
+  const dispatchFn = useCallback((action) => dispatch(prev => reducer(prev, action)), []);
+
+  useEffect(() => {
+    const interval = setInterval(() => dispatchFn({ type: "TICK" }), 3000);
+    return () => clearInterval(interval);
+  }, [dispatchFn]);
+
+  const alertCount = state.alerts.filter(a => a.severity === "high").length;
+
+  const pageMap = {
+    dashboard: <PageDashboard state={state} dispatch={dispatchFn} />,
+    sensors: <PageSensors state={state} />,
+    irrigation: <PageIrrigation state={state} dispatch={dispatchFn} />,
+    pump: <PagePump state={state} dispatch={dispatchFn} />,
+    map: <PageMap state={state} />,
+    alerts: <PageAlerts state={state} />,
+    analytics: <PageAnalytics state={state} />,
+    logs: <PageDataLogs state={state} />,
+    device: <PageDeviceStatus state={state} />,
+    syslog: <PageSystemLogs />,
+    settings: <PageSettings state={state} dispatch={dispatchFn} />,
+  };
+
+  return (
+    <div style={{ display: "flex", minHeight: "100vh", background: C.bg, fontFamily: "'DM Sans', 'Segoe UI', sans-serif", color: C.text }}>
+      {/* Sidebar */}
+      <aside style={{ width: sidebarOpen ? 230 : 56, minWidth: sidebarOpen ? 230 : 56, background: C.surface, borderRight: `1px solid ${C.cardBorder}`, display: "flex", flexDirection: "column", transition: "width .2s, min-width .2s", overflow: "hidden" }}>
+        {/* Logo */}
+        <div style={{ padding: "16px 14px 10px", display: "flex", alignItems: "center", gap: 10, borderBottom: `1px solid ${C.cardBorder}`, minHeight: 60 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: C.green + "22", border: `1.5px solid ${C.green}55`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Icon name="leaf" size={17} color={C.green} />
+          </div>
+          {sidebarOpen && (
+            <div>
+              <div style={{ color: C.green, fontWeight: 800, fontSize: 14, letterSpacing: 0.5, fontFamily: "'Georgia', serif", whiteSpace: "nowrap" }}>Krishi Setu</div>
+              <div style={{ color: C.textSub, fontSize: 9, letterSpacing: 1, textTransform: "uppercase" }}>Smart Agri IoT</div>
+            </div>
+          )}
+          <button onClick={() => setSidebarOpen(s => !s)} style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", flexShrink: 0 }}>
+            <Icon name={sidebarOpen ? "close" : "menu"} size={16} color={C.textMuted} />
+          </button>
+        </div>
+        {/* Nav */}
+        <nav style={{ flex: 1, padding: "10px 0", overflowY: "auto", overflowX: "hidden" }}>
+          {NAV.map(n => {
+            const active = page === n.id;
+            return (
+              <button key={n.id} onClick={() => setPage(n.id)}
+                style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: sidebarOpen ? "9px 14px" : "9px 0", justifyContent: sidebarOpen ? "flex-start" : "center", background: active ? C.green + "18" : "none", border: "none", borderLeft: `3px solid ${active ? C.green : "transparent"}`, cursor: "pointer", color: active ? C.green : C.textMuted, fontSize: 13, fontWeight: active ? 700 : 400, transition: "all .15s", position: "relative" }}>
+                <span style={{ flexShrink: 0 }}><Icon name={n.icon} size={16} color={active ? C.green : C.textMuted} /></span>
+                {sidebarOpen && <span style={{ whiteSpace: "nowrap" }}>{n.label}</span>}
+                {n.id === "alerts" && alertCount > 0 && (
+                  <span style={{ marginLeft: "auto", background: C.red, color: "#fff", borderRadius: 10, fontSize: 10, fontWeight: 700, padding: "1px 6px", minWidth: 18, textAlign: "center" }}>{alertCount}</span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+        {/* Footer */}
+        {sidebarOpen && (
+          <div style={{ padding: "12px 14px", borderTop: `1px solid ${C.cardBorder}` }}>
+            <div style={{ color: C.textSub, fontSize: 10, letterSpacing: 0.5 }}>v1.0 · LoRa Gateway</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4 }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.green, boxShadow: `0 0 5px ${C.green}` }} />
+              <span style={{ color: C.textMuted, fontSize: 10 }}>Gateway Online</span>
+            </div>
+          </div>
+        )}
+      </aside>
+
+      {/* Main */}
+      <main style={{ flex: 1, overflow: "auto", padding: "24px 28px", minWidth: 0 }}>
+        {pageMap[page]}
+      </main>
+    </div>
+  );
+}

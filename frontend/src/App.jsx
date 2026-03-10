@@ -1,1040 +1,952 @@
-
-import { useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import StatCard from "./components/statcard";
-import SensorChart from "./components/sensorchart";
-import MultiDeviceChart from "./components/MultiDeviceChart";
-import DataTable from "./components/datatable";
-import GPSMap from "./components/gpsmap";
-import DeviceDetail from "./components/DeviceDetail";
-import AlertPanel from "./components/AlertPanel";
-import AdminPanel from "./components/AdminPanel";
+/* eslint-disable react-hooks/purity */
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from "recharts";
 import Admin from "./pages/Admin";
-import Reports from "./components/Reports";
+import Landing from "./components/Landing";
+import GPSMap from "./components/gpsmap";
 
-function Dashboard() {
-  const navigate = useNavigate();
-  // --- authentication state ---
-  const [token, setToken] = useState(localStorage.getItem("token") || "");
-  const [usernameDisplay, setUsernameDisplay] = useState("");
-  const [authMode, setAuthMode] = useState("login"); // "login" or "register"
-  const [authUser, setAuthUser] = useState("");
-  const [authPass, setAuthPass] = useState("");
-  const [authError, setAuthError] = useState(null);
+// ─── Palette & Theme ───────────────────────────────────────────────────────
+export const C = {
+  bg: "#0a0f0a",
+  surface: "#111811",
+  card: "#151e15",
+  cardBorder: "#1e2e1e",
+  green: "#4ade80",
+  greenDim: "#22c55e",
+  greenGlow: "#16a34a",
+  amber: "#fbbf24",
+  red: "#f87171",
+  blue: "#60a5fa",
+  text: "#e2f0e2",
+  textMuted: "#6b8f6b",
+  textSub: "#4a6b4a",
+};
 
-  const [backendOnline, setBackendOnline] = useState(false);
-  const [devices, setDevices] = useState([]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState("");
-  const [allDeviceData, setAllDeviceData] = useState({});
-  const [deviceHistory, setDeviceHistory] = useState({});
+// ─── Data Simulation ────────────────────────────────────────────────────────
+const generateHistory = (base, variance, count = 48) =>
+  Array.from({ length: count }, (_, i) => ({
+    time: new Date(Date.now() - (count - i) * 30 * 60000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    value: Math.max(0, base + (Math.random() - 0.5) * variance * 2),
+  }));
+
+const NODES_INIT = [
+  { id: "NODE-01", lat: 14.6, lng: 75.9, name: "Field A – North", battery: 87, signal: -72 },
+  { id: "NODE-02", lat: 14.58, lng: 75.92, name: "Field B – East", battery: 62, signal: -85 },
+  { id: "NODE-03", lat: 14.62, lng: 75.88, name: "Field C – West", battery: 95, signal: -65 },
+  { id: "NODE-04", lat: 14.59, lng: 75.91, name: "Field D – South", battery: 41, signal: -91 },
+  { id: "NODE-05", lat: 14.61, lng: 75.93, name: "Greenhouse", battery: 78, signal: -70 },
+];
+
+const ALERTS_INIT = [
+  { id: 1, type: "Low Soil Moisture", nodeId: "NODE-02", value: "18%", threshold: "25%", time: "10:42 AM", severity: "high" },
+  { id: 2, type: "High Temperature", nodeId: "NODE-04", value: "38.2°C", threshold: "35°C", time: "09:15 AM", severity: "medium" },
+  { id: 3, type: "Node Offline", nodeId: "NODE-04", value: "–", threshold: "–", time: "08:50 AM", severity: "high" },
+  { id: 4, type: "Low Battery", nodeId: "NODE-04", value: "41%", threshold: "40%", time: "08:20 AM", severity: "low" },
+  { id: 5, type: "Low Soil Moisture", nodeId: "NODE-01", value: "22%", threshold: "25%", time: "Yesterday", severity: "medium" },
+];
+
+const LOGS_INIT = [
+  { time: "10:45 AM", event: "Sensor data received from NODE-01", type: "data" },
+  { time: "10:44 AM", event: "Pump automatically activated – soil moisture below threshold", type: "pump" },
+  { time: "10:42 AM", event: "Alert triggered: Low Soil Moisture on NODE-02", type: "alert" },
+  { time: "10:30 AM", event: "Manual pump control: STOP by admin", type: "manual" },
+  { time: "10:15 AM", event: "NODE-03 connected to gateway", type: "connect" },
+  { time: "10:12 AM", event: "Sensor data received from NODE-03", type: "data" },
+  { time: "09:58 AM", event: "Alert triggered: High Temperature on NODE-04", type: "alert" },
+  { time: "09:30 AM", event: "NODE-04 disconnected", type: "connect" },
+  { time: "09:15 AM", event: "Automatic irrigation stopped – moisture above max threshold", type: "pump" },
+];
+
+// ─── Utility Components ─────────────────────────────────────────────────────
+export const Icon = ({ name, size = 20, color = C.green }) => {
+  const icons = {
+    dashboard: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>,
+    sensors: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><circle cx="12" cy="12" r="3" /><path d="M6.3 6.3a8 8 0 0 0 0 11.4" /><path d="M17.7 6.3a8 8 0 0 1 0 11.4" /><path d="M3.5 3.5a14 14 0 0 0 0 17" /><path d="M20.5 3.5a14 14 0 0 1 0 17" /></svg>,
+    irrigation: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><path d="M12 2C6 9 4 12 4 15a8 8 0 0 0 16 0c0-3-2-6-8-13z" /><path d="M12 12v6" /></svg>,
+    pump: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><circle cx="12" cy="12" r="4" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /><path d="m4.9 4.9 2.1 2.1M16.9 16.9l2.2 2.2M4.9 19.1l2.1-2.1M16.9 7.1l2.2-2.2" /></svg>,
+    map: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21" /><line x1="9" y1="3" x2="9" y2="18" /><line x1="15" y1="6" x2="15" y2="21" /></svg>,
+    alerts: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><path d="M10.3 3.5a2 2 0 0 1 3.4 0l7.3 12.5A2 2 0 0 1 19.3 19H4.7a2 2 0 0 1-1.7-3L10.3 3.5z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>,
+    analytics: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>,
+    logs: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><line x1="10" y1="9" x2="8" y2="9" /></svg>,
+    device: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><rect x="5" y="2" width="14" height="20" rx="2" /><line x1="12" y1="18" x2="12.01" y2="18" /></svg>,
+    syslog: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>,
+    settings: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>,
+    temp: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" /></svg>,
+    moisture: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><path d="M12 2C6 9 4 12 4 15a8 8 0 0 0 16 0c0-3-2-6-8-13z" /></svg>,
+    humidity: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><line x1="8" y1="19" x2="8" y2="21" /><line x1="8" y1="13" x2="8" y2="15" /><line x1="16" y1="19" x2="16" y2="21" /><line x1="16" y1="13" x2="16" y2="15" /><line x1="12" y1="21" x2="12" y2="23" /><line x1="12" y1="15" x2="12" y2="17" /><path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25" /></svg>,
+    light: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><circle cx="12" cy="12" r="5" /><line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" /><line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" /><line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" /><line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" /></svg>,
+    menu: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" /></svg>,
+    close: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>,
+    leaf: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z" /><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" /></svg>,
+    download: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>,
+  };
+  return icons[name] || null;
+};
+
+const Badge = ({ label, color = C.green }) => (
+  <span style={{ background: color + "22", color, border: `1px solid ${color}44`, borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>{label}</span>
+);
+
+const StatusDot = ({ online }) => (
+  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: online ? C.green : C.red }}>
+    <span style={{ width: 8, height: 8, borderRadius: "50%", background: online ? C.green : C.red, boxShadow: online ? `0 0 6px ${C.green}` : "none", display: "inline-block" }} />
+    {online ? "Online" : "Offline"}
+  </span>
+);
+
+const MetricCard = ({ icon, label, value, unit, color = C.green, trend, sub }) => (
+  <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "20px 22px", display: "flex", flexDirection: "column", gap: 8, position: "relative", overflow: "hidden" }}>
+    <div style={{ position: "absolute", top: -20, right: -20, opacity: 0.06, transform: "scale(2.5)" }}><Icon name={icon} size={64} color={color} /></div>
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <Icon name={icon} size={18} color={color} />
+      <span style={{ color: C.textMuted, fontSize: 12, letterSpacing: 1, textTransform: "uppercase", fontWeight: 600 }}>{label}</span>
+    </div>
+    <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+      <span style={{ color, fontSize: 32, fontWeight: 800, fontFamily: "'Courier New', monospace", letterSpacing: -1 }}>{value}</span>
+      <span style={{ color: C.textMuted, fontSize: 14 }}>{unit}</span>
+    </div>
+    {sub && <div style={{ color: C.textSub, fontSize: 11 }}>{sub}</div>}
+    {trend !== undefined && (
+      <div style={{ color: trend >= 0 ? C.green : C.red, fontSize: 11, fontWeight: 600 }}>
+        {trend >= 0 ? "▲" : "▼"} {Math.abs(trend).toFixed(1)} from last hour
+      </div>
+    )}
+  </div>
+);
+
+const Btn = ({ label, onClick, color = C.green, outline, icon, disabled }) => (
+  <button onClick={onClick} disabled={disabled}
+    style={{
+      background: outline ? "transparent" : color + "22",
+      color: disabled ? C.textSub : color,
+      border: `1.5px solid ${disabled ? C.textSub : color}`,
+      borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 700,
+      cursor: disabled ? "not-allowed" : "pointer",
+      letterSpacing: 0.5, display: "inline-flex", alignItems: "center", gap: 6,
+      transition: "all .15s", opacity: disabled ? 0.5 : 1,
+    }}>
+    {icon && <Icon name={icon} size={14} color={disabled ? C.textSub : color} />}
+    {label}
+  </button>
+);
+
+// ─── Mini Sparkline ─────────────────────────────────────────────────────────
+const Spark = ({ data, color }) => (
+  <ResponsiveContainer width="100%" height={50}>
+    <AreaChart data={data.slice(-20)} margin={{ top: 2, bottom: 2 }}>
+      <defs><linearGradient id={`g${color.replace("#", "")}`} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="5%" stopColor={color} stopOpacity={0.3} />
+        <stop offset="95%" stopColor={color} stopOpacity={0} />
+      </linearGradient></defs>
+      <Area type="monotone" dataKey="value" stroke={color} strokeWidth={1.5} fill={`url(#g${color.replace("#", "")})`} dot={false} />
+    </AreaChart>
+  </ResponsiveContainer>
+);
+
+
+// ─── Pages ──────────────────────────────────────────────────────────────────
+
+const PageDashboard = ({ state, dispatch }) => {
+  const { sensors, pump, lights, nodes } = state;
+  const onlineNodes = nodes.filter(n => n.online).length;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Farm Overview</h1>
+          <p style={{ color: C.textMuted, fontSize: 13, margin: "4px 0 0" }}>Real-time agricultural monitoring · Updated {new Date().toLocaleTimeString()}</p>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Badge label={`${onlineNodes}/${nodes.length} NODES ACTIVE`} color={C.green} />
+          <Badge label="LORA GATEWAY ●" color={C.blue} />
+        </div>
+      </div>
+
+      {/* System Status Bar */}
+      <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 10, padding: "12px 20px", display: "flex", gap: 24, flexWrap: "wrap" }}>
+        {[
+          { label: "Pump", value: pump ? "RUNNING" : "IDLE", color: pump ? C.green : C.textMuted },
+          { label: "Lights", value: lights ? "ON" : "OFF", color: lights ? C.amber : C.textMuted },
+          { label: "Active Nodes", value: `${onlineNodes} / ${nodes.length}`, color: C.blue },
+          { label: "Last Update", value: new Date().toLocaleTimeString(), color: C.textMuted },
+        ].map(s => (
+          <div key={s.label} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span style={{ color: C.textSub, fontSize: 10, letterSpacing: 1, textTransform: "uppercase" }}>{s.label}</span>
+            <span style={{ color: s.color, fontSize: 13, fontWeight: 700, fontFamily: "monospace" }}>{s.value}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Sensor Cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}>
+        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ padding: "16px 18px 8px" }}>
+            <MetricCard icon="temp" label="Temperature" value={sensors.temp.toFixed(1)} unit="°C" color={C.amber} trend={0.4} />
+          </div>
+          <Spark data={state.history.temp} color={C.amber} />
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ padding: "16px 18px 8px" }}>
+            <MetricCard icon="moisture" label="Soil Moisture" value={sensors.moisture.toFixed(1)} unit="%" color={C.green} trend={-1.2} />
+          </div>
+          <Spark data={state.history.moisture} color={C.green} />
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ padding: "16px 18px 8px" }}>
+            <MetricCard icon="humidity" label="Humidity" value={sensors.humidity.toFixed(1)} unit="%" color={C.blue} trend={0.8} />
+          </div>
+          <Spark data={state.history.humidity} color={C.blue} />
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ padding: "16px 18px 8px" }}>
+            <MetricCard icon="light" label="Light Intensity" value={Math.round(sensors.light)} unit="lux" color="#a78bfa" trend={-120} />
+          </div>
+          <Spark data={state.history.light} color="#a78bfa" />
+        </div>
+      </div>
+
+      {/* Quick Actions */}
+      <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "20px 22px" }}>
+        <h3 style={{ color: C.text, fontSize: 14, fontWeight: 700, margin: "0 0 16px", letterSpacing: 1, textTransform: "uppercase" }}>Quick Actions</h3>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <Btn label="Start Pump" icon="pump" color={C.green} onClick={() => dispatch({ type: "SET_PUMP", val: true })} disabled={pump} />
+          <Btn label="Stop Pump" icon="pump" color={C.red} onClick={() => dispatch({ type: "SET_PUMP", val: false })} disabled={!pump} />
+          <Btn label="Lights ON" icon="light" color={C.amber} onClick={() => dispatch({ type: "SET_LIGHTS", val: true })} disabled={lights} />
+          <Btn label="Lights OFF" icon="light" color={C.textMuted} onClick={() => dispatch({ type: "SET_LIGHTS", val: false })} disabled={!lights} />
+        </div>
+        {pump && <div style={{ marginTop: 10, color: C.green, fontSize: 12 }}>● Borewell pump is currently running – irrigation active</div>}
+      </div>
+    </div>
+  );
+};
+
+const PageSensors = ({ state }) => {
+  const nodeData = useMemo(() => state.nodes.map((n, i) => ({
+    ...n,
+    temp: (28 + i * 1.3 + Math.random() * 2).toFixed(1),
+    moisture: (22 + i * 4 - Math.random() * 3).toFixed(1),
+    humidity: (60 + i * 2 + Math.random() * 5).toFixed(1),
+    light: Math.round(3200 + i * 400 - Math.random() * 300),
+    lastTx: new Date(Date.now() - i * 4 * 60000).toLocaleTimeString(),
+  })), [state.nodes]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Sensor Nodes</h1>
+      <p style={{ color: C.textMuted, fontSize: 13, margin: "-12px 0 0" }}>Live readings from {state.nodes.length} LoRa sensor nodes across the farm</p>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+              {["Node ID", "Soil Moisture", "Temperature", "Humidity", "Light (lux)", "Last TX", "Status"].map(h => (
+                <th key={h} style={{ color: C.textSub, fontSize: 11, letterSpacing: 1, textAlign: "left", padding: "10px 14px", fontWeight: 700, textTransform: "uppercase" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {nodeData.map((n, i) => (
+              <tr key={n.id} style={{ borderBottom: `1px solid ${C.cardBorder}`, background: i % 2 === 0 ? "transparent" : C.card + "88" }}>
+                <td style={{ padding: "12px 14px", color: C.green, fontWeight: 700, fontFamily: "monospace" }}>{n.id}</td>
+                <td style={{ padding: "12px 14px", color: C.text }}>
+                  <span style={{ color: parseFloat(n.moisture) < 25 ? C.red : C.green }}>{n.moisture}%</span>
+                </td>
+                <td style={{ padding: "12px 14px", color: C.text }}>
+                  <span style={{ color: parseFloat(n.temp) > 35 ? C.red : C.amber }}>{n.temp}°C</span>
+                </td>
+                <td style={{ padding: "12px 14px", color: C.blue }}>{n.humidity}%</td>
+                <td style={{ padding: "12px 14px", color: "#a78bfa" }}>{n.light}</td>
+                <td style={{ padding: "12px 14px", color: C.textMuted, fontFamily: "monospace", fontSize: 12 }}>{n.lastTx}</td>
+                <td style={{ padding: "12px 14px" }}><StatusDot online={n.online} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+const PageIrrigation = ({ state, dispatch }) => {
+  const { autoMode, minMoisture, maxMoisture, pump } = state;
+  const [localMin, setLocalMin] = useState(minMoisture);
+  const [localMax, setLocalMax] = useState(maxMoisture);
+
+  const save = () => {
+    dispatch({ type: "SET_THRESHOLDS", min: parseFloat(localMin), max: parseFloat(localMax) });
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Automatic Irrigation Control</h1>
+
+      {/* Auto Mode Toggle */}
+      <div style={{ background: C.card, border: `1px solid ${autoMode ? C.green + "66" : C.cardBorder}`, borderRadius: 12, padding: "20px 22px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <div style={{ color: C.text, fontSize: 15, fontWeight: 700 }}>Automatic Mode</div>
+          <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4 }}>System will auto-control the pump based on soil moisture thresholds</div>
+        </div>
+        <button onClick={() => dispatch({ type: "TOGGLE_AUTO" })}
+          style={{ background: autoMode ? C.green + "33" : C.card, border: `2px solid ${autoMode ? C.green : C.textSub}`, borderRadius: 30, padding: "8px 20px", color: autoMode ? C.green : C.textMuted, fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all .2s", letterSpacing: 0.5 }}>
+          {autoMode ? "● AUTO MODE ON" : "○ AUTO MODE OFF"}
+        </button>
+      </div>
+
+      {/* Thresholds */}
+      <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "20px 22px" }}>
+        <h3 style={{ color: C.text, fontSize: 14, fontWeight: 700, margin: "0 0 16px", textTransform: "uppercase", letterSpacing: 1 }}>Moisture Thresholds</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, maxWidth: 420 }}>
+          <div>
+            <label style={{ color: C.textMuted, fontSize: 11, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 6 }}>Min (Pump ON below)</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input type="number" value={localMin} onChange={e => setLocalMin(e.target.value)} min={0} max={100}
+                style={{ background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 6, padding: "8px 12px", color: C.green, fontSize: 16, fontWeight: 700, fontFamily: "monospace", width: 80, outline: "none" }} />
+              <span style={{ color: C.textMuted }}>%</span>
+            </div>
+          </div>
+          <div>
+            <label style={{ color: C.textMuted, fontSize: 11, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 6 }}>Max (Pump OFF above)</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input type="number" value={localMax} onChange={e => setLocalMax(e.target.value)} min={0} max={100}
+                style={{ background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 6, padding: "8px 12px", color: C.green, fontSize: 16, fontWeight: 700, fontFamily: "monospace", width: 80, outline: "none" }} />
+              <span style={{ color: C.textMuted }}>%</span>
+            </div>
+          </div>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <Btn label="Save Thresholds" color={C.green} onClick={save} />
+        </div>
+      </div>
+
+      {/* Logic Display */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, maxWidth: 600 }}>
+        <div style={{ background: C.card, border: `1px solid ${C.red}33`, borderRadius: 10, padding: 16 }}>
+          <div style={{ color: C.red, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>Pump ON Condition</div>
+          <div style={{ color: C.text, fontFamily: "monospace", fontSize: 13 }}>Moisture &lt; <span style={{ color: C.green }}>{state.minMoisture}%</span></div>
+          <div style={{ color: C.textMuted, fontSize: 11, marginTop: 6 }}>Current: <span style={{ color: C.green }}>{state.sensors.moisture.toFixed(1)}%</span>
+            {state.sensors.moisture < state.minMoisture && <span style={{ color: C.red }}> · CONDITION MET</span>}
+          </div>
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.green}33`, borderRadius: 10, padding: 16 }}>
+          <div style={{ color: C.green, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>Pump OFF Condition</div>
+          <div style={{ color: C.text, fontFamily: "monospace", fontSize: 13 }}>Moisture &gt; <span style={{ color: C.amber }}>{state.maxMoisture}%</span></div>
+          <div style={{ color: C.textMuted, fontSize: 11, marginTop: 6 }}>Current: <span style={{ color: C.green }}>{state.sensors.moisture.toFixed(1)}%</span>
+            {state.sensors.moisture > state.maxMoisture && <span style={{ color: C.amber }}> · CONDITION MET</span>}
+          </div>
+        </div>
+      </div>
+
+      {/* Gauge */}
+      <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "20px 22px" }}>
+        <div style={{ color: C.textMuted, fontSize: 11, letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>Current Soil Moisture</div>
+        <div style={{ position: "relative", height: 18, background: C.surface, borderRadius: 9, overflow: "hidden" }}>
+          <div style={{ position: "absolute", left: `${state.minMoisture}%`, top: 0, bottom: 0, width: 2, background: C.red, zIndex: 2 }} />
+          <div style={{ position: "absolute", left: `${state.maxMoisture}%`, top: 0, bottom: 0, width: 2, background: C.amber, zIndex: 2 }} />
+          <div style={{ height: "100%", width: `${state.sensors.moisture}%`, background: `linear-gradient(90deg, ${C.green}88, ${C.green})`, borderRadius: 9, transition: "width 1s" }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.textSub, marginTop: 4 }}>
+          <span>0%</span><span style={{ color: C.red }}>▲ Min {state.minMoisture}%</span><span style={{ color: C.amber }}>▲ Max {state.maxMoisture}%</span><span>100%</span>
+        </div>
+        <div style={{ marginTop: 10, color: C.green, fontSize: 22, fontWeight: 800, fontFamily: "monospace" }}>{state.sensors.moisture.toFixed(1)}%</div>
+        <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4 }}>Pump Status: <span style={{ color: pump ? C.green : C.textMuted, fontWeight: 700 }}>{pump ? "RUNNING" : "IDLE"}</span></div>
+      </div>
+    </div>
+  );
+};
+
+const PagePump = ({ state, dispatch }) => {
+  const { pump, lights } = state;
+  const runningSince = useMemo(() => new Date(Date.now() - 8 * 60000).toLocaleTimeString(), []);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Pump & Lighting Control</h1>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, maxWidth: 700 }}>
+        {/* Pump */}
+        <div style={{ background: C.card, border: `1px solid ${pump ? C.green + "55" : C.cardBorder}`, borderRadius: 14, padding: "28px 24px", display: "flex", flexDirection: "column", gap: 18, alignItems: "center", textAlign: "center" }}>
+          <div style={{ width: 72, height: 72, borderRadius: "50%", border: `2px solid ${pump ? C.green : C.cardBorder}`, display: "flex", alignItems: "center", justifyContent: "center", background: pump ? C.green + "22" : "transparent", boxShadow: pump ? `0 0 24px ${C.green}44` : "none", transition: "all .3s" }}>
+            <Icon name="pump" size={32} color={pump ? C.green : C.textSub} />
+          </div>
+          <div>
+            <div style={{ color: C.text, fontSize: 16, fontWeight: 700 }}>Borewell Pump</div>
+            <div style={{ color: pump ? C.green : C.textMuted, fontSize: 13, fontWeight: 700, marginTop: 4, fontFamily: "monospace" }}>● {pump ? "RUNNING" : "IDLE"}</div>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+            <Btn label="Start" color={C.green} onClick={() => dispatch({ type: "SET_PUMP", val: true })} disabled={pump} />
+            <Btn label="Stop" color={C.red} onClick={() => dispatch({ type: "SET_PUMP", val: false })} disabled={!pump} />
+          </div>
+          {pump && <div style={{ color: C.textMuted, fontSize: 11 }}>Running since {runningSince}</div>}
+        </div>
+        {/* Lights */}
+        <div style={{ background: C.card, border: `1px solid ${lights ? C.amber + "55" : C.cardBorder}`, borderRadius: 14, padding: "28px 24px", display: "flex", flexDirection: "column", gap: 18, alignItems: "center", textAlign: "center" }}>
+          <div style={{ width: 72, height: 72, borderRadius: "50%", border: `2px solid ${lights ? C.amber : C.cardBorder}`, display: "flex", alignItems: "center", justifyContent: "center", background: lights ? C.amber + "22" : "transparent", boxShadow: lights ? `0 0 24px ${C.amber}44` : "none", transition: "all .3s" }}>
+            <Icon name="light" size={32} color={lights ? C.amber : C.textSub} />
+          </div>
+          <div>
+            <div style={{ color: C.text, fontSize: 16, fontWeight: 700 }}>Field Lighting</div>
+            <div style={{ color: lights ? C.amber : C.textMuted, fontSize: 13, fontWeight: 700, marginTop: 4, fontFamily: "monospace" }}>● {lights ? "ON" : "OFF"}</div>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+            <Btn label="Turn ON" color={C.amber} onClick={() => dispatch({ type: "SET_LIGHTS", val: true })} disabled={lights} />
+            <Btn label="Turn OFF" color={C.textMuted} onClick={() => dispatch({ type: "SET_LIGHTS", val: false })} disabled={!lights} />
+          </div>
+        </div>
+      </div>
+      {/* Command Log */}
+      <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "18px 20px" }}>
+        <div style={{ color: C.textMuted, fontSize: 11, letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>Recent Commands</div>
+        {[
+          { t: "10:44 AM", msg: "Pump started via Auto Irrigation", by: "system" },
+          { t: "10:30 AM", msg: "Pump stopped manually", by: "admin" },
+          { t: "10:00 AM", msg: "Lights turned OFF", by: "admin" },
+          { t: "06:00 AM", msg: "Lights turned ON", by: "schedule" },
+        ].map((l, i) => (
+          <div key={i} style={{ display: "flex", gap: 12, borderBottom: `1px solid ${C.cardBorder}`, padding: "8px 0", fontSize: 13 }}>
+            <span style={{ color: C.textSub, fontFamily: "monospace", fontSize: 11, minWidth: 70 }}>{l.t}</span>
+            <span style={{ color: C.text, flex: 1 }}>{l.msg}</span>
+            <Badge label={l.by} color={l.by === "system" ? C.green : l.by === "schedule" ? C.blue : C.amber} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// PageMap removed in favor of GPSMap component
+
+const PageAlerts = () => {
+  const sevColor = s => s === "high" ? C.red : s === "medium" ? C.amber : C.blue;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Alerts & Notifications</h1>
+          <p style={{ color: C.textMuted, fontSize: 13, margin: "4px 0 0" }}>System alerts triggered by sensor threshold violations</p>
+        </div>
+        <Badge label={`${ALERTS_INIT.filter(a => a.severity === "high").length} CRITICAL`} color={C.red} />
+      </div>
+      {ALERTS_INIT.map(a => (
+        <div key={a.id} style={{ background: C.card, border: `1px solid ${sevColor(a.severity)}33`, borderLeft: `3px solid ${sevColor(a.severity)}`, borderRadius: 10, padding: "14px 18px", display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <div style={{ marginTop: 2 }}><Icon name="alerts" size={18} color={sevColor(a.severity)} /></div>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ color: sevColor(a.severity), fontWeight: 700, fontSize: 14 }}>{a.type}</div>
+            <div style={{ color: C.textMuted, fontSize: 12, marginTop: 3 }}>Device: <span style={{ color: C.green, fontFamily: "monospace" }}>{a.nodeId}</span> · Value: <span style={{ color: C.text }}>{a.value}</span> · Threshold: <span style={{ color: C.textMuted }}>{a.threshold}</span></div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+            <Badge label={a.severity.toUpperCase()} color={sevColor(a.severity)} />
+            <span style={{ color: C.textSub, fontSize: 11, fontFamily: "monospace" }}>{a.time}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const Chart4 = ({ data, color, label, unit }) => (
+  <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "16px 14px" }}>
+    <div style={{ color: C.textMuted, fontSize: 11, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>{label}</div>
+    <ResponsiveContainer width="100%" height={140}>
+      <AreaChart data={data}>
+        <defs><linearGradient id={`cg${color.replace("#", "")}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="5%" stopColor={color} stopOpacity={0.25} />
+          <stop offset="95%" stopColor={color} stopOpacity={0} />
+        </linearGradient></defs>
+        <CartesianGrid stroke={C.cardBorder} strokeDasharray="3 3" />
+        <XAxis dataKey="time" tick={{ fill: C.textSub, fontSize: 10 }} interval={Math.floor(data.length / 4)} />
+        <YAxis tick={{ fill: C.textSub, fontSize: 10 }} />
+        <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 6, color: C.text, fontSize: 12 }} formatter={v => [`${v.toFixed(1)} ${unit}`, label]} />
+        <Area type="monotone" dataKey="value" stroke={color} strokeWidth={2} fill={`url(#cg${color.replace("#", "")})`} dot={false} />
+      </AreaChart>
+    </ResponsiveContainer>
+  </div>
+);
+
+const PageAnalytics = ({ state }) => {
+  const [filter, setFilter] = useState("24h");
+  const filters = ["1h", "24h", "7d", "30d"];
+  const cnt = { "1h": 12, "24h": 48, "7d": 168, "30d": 720 };
+  const histLen = Math.min(cnt[filter], state.history.temp.length);
+
+  const tempData = state.history.temp.slice(-histLen);
+  const moistureData = state.history.moisture.slice(-histLen);
+  const humidityData = state.history.humidity.slice(-histLen);
+  const lightData = state.history.light.slice(-histLen);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+        <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Analytics</h1>
+        <div style={{ display: "flex", gap: 6 }}>
+          {filters.map(f => (
+            <button key={f} onClick={() => setFilter(f)}
+              style={{ background: filter === f ? C.green + "33" : "transparent", border: `1px solid ${filter === f ? C.green : C.cardBorder}`, borderRadius: 6, padding: "5px 12px", color: filter === f ? C.green : C.textMuted, fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
+              {f === "1h" ? "Last Hour" : f === "24h" ? "24 Hours" : f === "7d" ? "7 Days" : "30 Days"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16 }}>
+        <Chart4 data={tempData} color={C.amber} label="Temperature" unit="°C" />
+        <Chart4 data={moistureData} color={C.green} label="Soil Moisture" unit="%" />
+        <Chart4 data={humidityData} color={C.blue} label="Humidity" unit="%" />
+        <Chart4 data={lightData} color="#a78bfa" label="Light Intensity" unit="lux" />
+      </div>
+    </div>
+  );
+};
+
+const PageDataLogs = () => {
+  const rows = useMemo(() => Array.from({ length: 20 }, (_, i) => ({
+    time: new Date(Date.now() - i * 15 * 60000).toLocaleTimeString(),
+    node: `NODE-0${(i % 5) + 1}`,
+    temp: (28 + Math.random() * 5).toFixed(1),
+    humidity: (60 + Math.random() * 15).toFixed(1),
+    moisture: (22 + Math.random() * 20).toFixed(1),
+    light: Math.round(2800 + Math.random() * 1200),
+  })), []);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Data Logs</h1>
+          <p style={{ color: C.textMuted, fontSize: 13, margin: "4px 0 0" }}>Historical sensor readings · {rows.length} records</p>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn label="Export CSV" icon="download" color={C.green} />
+          <Btn label="Export PDF" icon="download" color={C.blue} />
+        </div>
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+              {["Timestamp", "Node ID", "Temp (°C)", "Humidity (%)", "Moisture (%)", "Light (lux)"].map(h => (
+                <th key={h} style={{ color: C.textSub, fontSize: 11, letterSpacing: 1, textAlign: "left", padding: "10px 14px", fontWeight: 700, textTransform: "uppercase" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} style={{ borderBottom: `1px solid ${C.cardBorder}88`, background: i % 2 === 0 ? "transparent" : C.card + "55" }}>
+                <td style={{ padding: "10px 14px", color: C.textMuted, fontFamily: "monospace", fontSize: 11 }}>{r.time}</td>
+                <td style={{ padding: "10px 14px", color: C.green, fontFamily: "monospace", fontWeight: 700 }}>{r.node}</td>
+                <td style={{ padding: "10px 14px", color: C.amber }}>{r.temp}</td>
+                <td style={{ padding: "10px 14px", color: C.blue }}>{r.humidity}</td>
+                <td style={{ padding: "10px 14px", color: C.green }}>{r.moisture}</td>
+                <td style={{ padding: "10px 14px", color: "#a78bfa" }}>{r.light}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+const PageDeviceStatus = ({ state }) => {
+  const nodesWithTime = useMemo(() => state.nodes.map((n, i) => ({
+    ...n,
+    lastData: new Date(Date.now() - i * 4 * 60000).toLocaleTimeString(),
+    name: NODES_INIT[i]?.name
+  })), [state.nodes]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Device Status</h1>
+      <p style={{ color: C.textMuted, fontSize: 13, margin: "-12px 0 0" }}>Health monitoring for all LoRa sensor nodes</p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
+        {nodesWithTime.map(n => (
+          <div key={n.id} style={{ background: C.card, border: `1px solid ${n.online ? C.green + "33" : C.red + "33"}`, borderRadius: 12, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ color: C.green, fontWeight: 700, fontFamily: "monospace", fontSize: 14 }}>{n.id}</span>
+              <StatusDot online={n.online} />
+            </div>
+            <div style={{ fontSize: 12, color: C.textMuted }}>{n.name}</div>
+            <hr style={{ border: "none", borderTop: `1px solid ${C.cardBorder}` }} />
+            {/* Battery */}
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ color: C.textSub, fontSize: 11, letterSpacing: 1, textTransform: "uppercase" }}>Battery</span>
+                <span style={{ color: n.battery > 50 ? C.green : n.battery > 25 ? C.amber : C.red, fontWeight: 700, fontSize: 12, fontFamily: "monospace" }}>{n.battery}%</span>
+              </div>
+              <div style={{ height: 6, background: C.surface, borderRadius: 3, overflow: "hidden" }}>
+                <div style={{ width: `${n.battery}%`, height: "100%", background: n.battery > 50 ? C.green : n.battery > 25 ? C.amber : C.red, borderRadius: 3 }} />
+              </div>
+            </div>
+            {/* Signal */}
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ color: C.textSub, fontSize: 11, textTransform: "uppercase", letterSpacing: 1 }}>Signal (RSSI)</span>
+              <span style={{ color: C.blue, fontFamily: "monospace", fontSize: 12, fontWeight: 700 }}>{n.signal} dBm</span>
+            </div>
+            <div style={{ color: C.textSub, fontSize: 11 }}>Last data: {n.lastData}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const PageSystemLogs = () => {
+  const typeColor = t => t === "pump" ? C.green : t === "alert" ? C.red : t === "manual" ? C.amber : t === "connect" ? C.blue : C.textMuted;
+  const typeIcon = t => t === "pump" ? "pump" : t === "alert" ? "alerts" : t === "manual" ? "settings" : t === "connect" ? "sensors" : "syslog";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>System Logs</h1>
+      <p style={{ color: C.textMuted, fontSize: 13, margin: "-12px 0 0" }}>Chronological log of all system events</p>
+      <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
+        {LOGS_INIT.map((l, i) => (
+          <div key={i} style={{ display: "flex", gap: 14, padding: "12px 18px", borderBottom: `1px solid ${C.cardBorder}`, alignItems: "flex-start", background: i % 2 === 0 ? "transparent" : C.surface + "55" }}>
+            <Icon name={typeIcon(l.type)} size={15} color={typeColor(l.type)} />
+            <span style={{ color: C.textSub, fontFamily: "monospace", fontSize: 11, minWidth: 72 }}>{l.time}</span>
+            <span style={{ color: C.text, fontSize: 13, flex: 1 }}>{l.event}</span>
+            <Badge label={l.type.toUpperCase()} color={typeColor(l.type)} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const PageSettings = () => {
+  const [name, setName] = useState("Green Valley Farm");
+  const [email, setEmail] = useState("admin@krishisetu.in");
+  const [interval, setInterval] = useState("30");
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 22, maxWidth: 600 }}>
+      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Settings</h1>
+      {[
+        { title: "Farm Details", fields: [{ label: "Farm Name", val: name, set: setName, type: "text" }, { label: "Admin Email", val: email, set: setEmail, type: "email" }] },
+        { title: "Data Sync", fields: [{ label: "Sensor Poll Interval (sec)", val: interval, set: setInterval, type: "number" }] },
+      ].map(section => (
+        <div key={section.title} style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "20px 22px" }}>
+          <h3 style={{ color: C.text, fontSize: 14, fontWeight: 700, margin: "0 0 16px", letterSpacing: 1, textTransform: "uppercase" }}>{section.title}</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {section.fields.map(f => (
+              <div key={f.label}>
+                <label style={{ color: C.textMuted, fontSize: 11, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 6 }}>{f.label}</label>
+                <input type={f.type} value={f.val} onChange={e => f.set(e.target.value)}
+                  style={{ width: "100%", background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 6, padding: "8px 12px", color: C.text, fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      <Btn label="Save Settings" color={C.green} icon="settings" />
+    </div>
+  );
+};
+
+// ─── App State & Backend Integration ──────────────────────────────────────────
+const initState = () => ({
+  sensors: { temp: 0, moisture: 0, humidity: 0, light: 0 },
+  pump: false,
+  lights: false,
+  autoMode: true,
+  minMoisture: 25,
+  maxMoisture: 65,
+  nodes: [],
+  history: {
+    temp: [],
+    moisture: [],
+    humidity: [],
+    light: [],
+  },
+  alerts: [],
+});
+
+const reducer = (state, action) => {
+  switch (action.type) {
+    case "SET_PUMP": return { ...state, pump: action.val };
+    case "SET_LIGHTS": return { ...state, lights: action.val };
+    case "TOGGLE_AUTO": return { ...state, autoMode: !state.autoMode };
+    case "SET_THRESHOLDS": return { ...state, minMoisture: action.min, maxMoisture: action.max };
+    case "MERGE_LIVE_DATA": {
+      const { devices, alerts, allData } = action.payload;
+
+      // Calculate farm-wide averages for the dashboard
+      let avgTemp = 0, avgMoist = 0, avgHum = 0, avgLight = 0, onlineCount = 0;
+
+      const updatedNodes = devices.map(d => {
+        const dData = allData[d.id];
+        const isOnline = dData?.status === 'online';
+        if (isOnline) {
+          avgTemp += (dData.temperature || 0);
+          avgMoist += (dData.soil || 0);
+          avgHum += (dData.humidity || 0);
+          avgLight += (dData.light || 4000); // Backwards compatibility if light missing
+          onlineCount++;
+        }
+        return {
+          id: d.id,
+          name: d.name || `Node ${d.id}`,
+          lat: d.latitude,
+          lng: d.longitude,
+          online: isOnline,
+          battery: isOnline ? 100 : 0, // Mock battery if backend doesn't supply it natively yet
+          signal: dData?.rssi || -100,
+          ...dData // Spread native sensor properties inside
+        };
+      });
+
+      if (onlineCount > 0) {
+        avgTemp /= onlineCount;
+        avgMoist /= onlineCount;
+        avgHum /= onlineCount;
+        avgLight /= onlineCount;
+      }
+
+      const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const addPoint = (arr, val) => {
+        if (arr.length > 0 && arr[arr.length - 1].time === timestamp) return arr; // prevent duplicate stamps in exact same minute
+        return [...arr.slice(-49), { time: timestamp, value: val }];
+      };
+
+      // Evaluate local auto rules
+      let pumpState = state.pump;
+      if (state.autoMode && onlineCount > 0) {
+        if (avgMoist < state.minMoisture) pumpState = true;
+        if (avgMoist > state.maxMoisture) pumpState = false;
+      }
+
+      return {
+        ...state,
+        pump: pumpState,
+        nodes: updatedNodes,
+        alerts: alerts || state.alerts,
+        sensors: {
+          temp: avgTemp,
+          moisture: avgMoist,
+          humidity: avgHum,
+          light: avgLight
+        },
+        history: {
+          temp: addPoint(state.history.temp, avgTemp),
+          moisture: addPoint(state.history.moisture, avgMoist),
+          humidity: addPoint(state.history.humidity, avgHum),
+          light: addPoint(state.history.light, avgLight),
+        }
+      };
+    }
+    default: return state;
+  }
+};
+
+// ─── Root App ────────────────────────────────────────────────────────────────
+const NAV = [
+  { id: "dashboard", icon: "dashboard", label: "Dashboard" },
+  { id: "sensors", icon: "sensors", label: "Sensors" },
+  { id: "irrigation", icon: "irrigation", label: "Irrigation Control" },
+  { id: "pump", icon: "pump", label: "Pump & Lighting" },
+  { id: "map", icon: "map", label: "Farm Map" },
+  { id: "alerts", icon: "alerts", label: "Alerts" },
+  { id: "analytics", icon: "analytics", label: "Analytics" },
+  { id: "logs", icon: "logs", label: "Data Logs" },
+  { id: "device", icon: "device", label: "Device Status" },
+  { id: "syslog", icon: "syslog", label: "System Logs" },
+  { id: "settings", icon: "settings", label: "Settings" },
+  { id: "admin", icon: "settings", label: "Admin Panel" },
+  { id: "logout", icon: "close", label: "Logout" },
+];
+
+function DashboardLayout({ token, setToken, userRole, apiFetch }) {
+  const [page, setPage] = useState("dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [demoMode, setDemoMode] = useState(false);
-  const [selectedCard, setSelectedCard] = useState(null);
-  const [showMap, setShowMap] = useState(true);
-  const [viewMode, setViewMode] = useState("single");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [showAddDeviceModal, setShowAddDeviceModal] = useState(false);
-  const [viewingDeviceDetail, setViewingDeviceDetail] = useState(false);
-  const [addPickMode, setAddPickMode] = useState(false);
-  const [mapRefreshKey, setMapRefreshKey] = useState(0);
-  const [newDeviceData, setNewDeviceData] = useState({ name: "", latitude: "", longitude: "", location_name: "" });
-  const [addingDevice, setAddingDevice] = useState(false);
-const [showAlertPanel, setShowAlertPanel] = useState(false);
-  const [alertCount, setAlertCount] = useState(0);
-  const [alertLoading, setAlertLoading] = useState(true);
-  const [userRole, setUserRole] = useState(localStorage.getItem("userRole") || "");
-  const [showPassword, setShowPassword] = useState(false);
-  const [alertSettings, setAlertSettings] = useState({});
-  const [showReports, setShowReports] = useState(false);
+  const [state, dispatch] = useState(initState());
+  const dispatchFn = useCallback((action) => dispatch(prev => reducer(prev, action)), []);
 
-  /* decode token to show username and role */
+  // API Bootstrapping & Polling
+  useEffect(() => {
+    let interval;
+    const fetchLiveData = async () => {
+      try {
+        const [devicesRes, alertsRes, dataRes] = await Promise.all([
+          apiFetch("http://localhost:5000/api/devices"),
+          apiFetch("http://localhost:5000/api/alerts/active"),
+          demoMode ? Promise.resolve({ ok: true, json: () => ({}) }) : apiFetch("http://localhost:5000/api/all-devices-data")
+        ]);
+
+        if (devicesRes.ok && dataRes.ok) {
+          const devices = await devicesRes.json();
+          const alerts = alertsRes.ok ? await alertsRes.json() : [];
+          let allData = await dataRes.json();
+
+          if (demoMode) {
+            allData = {};
+            devices.forEach((device, idx) => {
+              allData[device.id] = {
+                soil: Math.max(10, Math.min(90, 35 + Math.floor(Math.random() * 20) - 10)),
+                temperature: 25 + idx + Math.floor(Math.random() * 4) - 2,
+                humidity: 50 + idx * 5 + Math.floor(Math.random() * 10) - 5,
+                light: 4000 + Math.floor(Math.random() * 1000) - 500,
+                rssi: -70 + Math.floor(Math.random() * 10) - 5,
+                status: 'online'
+              };
+            });
+          }
+
+          dispatchFn({ type: "MERGE_LIVE_DATA", payload: { devices, alerts, allData } });
+        } else if (devicesRes.status === 401 || devicesRes.status === 403) {
+          // Handled by apiFetch wrapper generally, but explicit catches just in case
+        }
+      } catch (err) {
+        console.error("Failed to connect to backend", err);
+      }
+    };
+
+    fetchLiveData(); // Initial fetch
+    interval = setInterval(fetchLiveData, demoMode ? 3000 : 10000); // Poll faster in demo mode
+
+    return () => clearInterval(interval);
+  }, [apiFetch, dispatchFn, demoMode]);
+
+  const alertCount = state.alerts.filter(a => a.severity === "high").length;
+
+  const pageMap = {
+    dashboard: <PageDashboard state={state} dispatch={dispatchFn} />,
+    sensors: <PageSensors state={state} />,
+    irrigation: <PageIrrigation state={state} dispatch={dispatchFn} />,
+    pump: <PagePump state={state} dispatch={dispatchFn} />,
+    map: <GPSMap devices={state.nodes} onDeviceClick={(id) => { }} selectedDevice={null} onDeviceNameClick={(id) => { }} />,
+    alerts: <PageAlerts state={state} />,
+    analytics: <PageAnalytics state={state} />,
+    logs: <PageDataLogs state={state} />,
+    device: <PageDeviceStatus state={state} />,
+    syslog: <PageSystemLogs />,
+    settings: <PageSettings state={state} dispatch={dispatchFn} />,
+  };
+
+  return (
+    <div style={{ display: "flex", minHeight: "100vh", background: C.bg, fontFamily: "'DM Sans', 'Segoe UI', sans-serif", color: C.text }}>
+      {/* Sidebar */}
+      <aside style={{ width: sidebarOpen ? 230 : 56, minWidth: sidebarOpen ? 230 : 56, background: C.surface, borderRight: `1px solid ${C.cardBorder}`, display: "flex", flexDirection: "column", transition: "width .2s, min-width .2s", overflow: "hidden" }}>
+        {/* Logo */}
+        <div style={{ padding: "16px 14px 10px", display: "flex", alignItems: "center", gap: 10, borderBottom: `1px solid ${C.cardBorder}`, minHeight: 60 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: C.green + "22", border: `1.5px solid ${C.green}55`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Icon name="leaf" size={17} color={C.green} />
+          </div>
+          {sidebarOpen && (
+            <div>
+              <div style={{ color: C.green, fontWeight: 800, fontSize: 14, letterSpacing: 0.5, fontFamily: "'Georgia', serif", whiteSpace: "nowrap" }}>Krishi Setu</div>
+              <div style={{ color: C.textSub, fontSize: 9, letterSpacing: 1, textTransform: "uppercase" }}>Smart Agri IoT</div>
+            </div>
+          )}
+          <button onClick={() => setSidebarOpen(s => !s)} style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", flexShrink: 0 }}>
+            <Icon name={sidebarOpen ? "close" : "menu"} size={16} color={C.textMuted} />
+          </button>
+        </div>
+        {/* Nav */}
+        <nav style={{ flex: 1, padding: "10px 0", overflowY: "auto", overflowX: "hidden" }}>
+          {NAV.map(n => {
+            if (n.id === "admin" && userRole !== "admin") return null;
+
+            const active = page === n.id;
+            return (
+              <button key={n.id} onClick={() => {
+                if (n.id === "logout") {
+                  setToken("");
+                  localStorage.removeItem("token");
+                  window.location.href = "/";
+                } else if (n.id === "admin") {
+                  window.location.href = "/admin";
+                } else {
+                  setPage(n.id);
+                }
+              }}
+                style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: sidebarOpen ? "9px 14px" : "9px 0", justifyContent: sidebarOpen ? "flex-start" : "center", background: active ? C.green + "18" : "none", border: "none", borderLeft: `3px solid ${active ? C.green : "transparent"}`, cursor: "pointer", color: active ? C.green : C.textMuted, fontSize: 13, fontWeight: active ? 700 : 400, transition: "all .15s", position: "relative" }}>
+                <span style={{ flexShrink: 0 }}><Icon name={n.icon} size={16} color={active ? C.green : C.textMuted} /></span>
+                {sidebarOpen && <span style={{ whiteSpace: "nowrap" }}>{n.label}</span>}
+                {n.id === "alerts" && alertCount > 0 && (
+                  <span style={{ marginLeft: "auto", background: C.red, color: "#fff", borderRadius: 10, fontSize: 10, fontWeight: 700, padding: "1px 6px", minWidth: 18, textAlign: "center" }}>{alertCount}</span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+        {/* Footer */}
+        {sidebarOpen && (
+          <div style={{ padding: "12px 14px", borderTop: `1px solid ${C.cardBorder}` }}>
+            <div style={{ color: C.textSub, fontSize: 10, letterSpacing: 0.5 }}>v1.0 · LoRa Gateway</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.green, boxShadow: `0 0 5px ${C.green}` }} />
+                <span style={{ color: C.textMuted, fontSize: 10 }}>Gateway Online</span>
+              </div>
+              <button
+                onClick={() => setDemoMode(!demoMode)}
+                style={{ background: demoMode ? C.amber + "22" : "transparent", color: demoMode ? C.amber : C.textMuted, border: `1px solid ${demoMode ? C.amber + "55" : C.cardBorder}`, borderRadius: 4, padding: "2px 6px", fontSize: 9, fontWeight: 700, cursor: "pointer", textTransform: "uppercase", transition: "all 0.2s" }}
+              >
+                {demoMode ? "Demo On" : "Demo Off"}
+              </button>
+            </div>
+          </div>
+        )}
+      </aside>
+
+      {/* Main */}
+      <main style={{ flex: 1, overflow: "auto", padding: "24px 28px", minWidth: 0 }}>
+        {pageMap[page]}
+      </main>
+    </div>
+  );
+}
+
+export default function App() {
+  const [token, setToken] = useState(localStorage.getItem("token") || "");
+  const [userRole, setUserRole] = useState(localStorage.getItem("userRole") || "");
+
   useEffect(() => {
     if (token) {
       try {
         const payload = JSON.parse(atob(token.split('.')[1]));
-        setUsernameDisplay(payload.username || "");
         const role = payload.role || "user";
+        // eslint-disable-next-line
         setUserRole(role);
         localStorage.setItem("userRole", role);
-      } catch (e) {
-        setUsernameDisplay("");
+      } catch (e) { // eslint-disable-line no-unused-vars
+        // eslint-disable-next-line
         setUserRole("user");
         localStorage.setItem("userRole", "user");
       }
     } else {
-      setUsernameDisplay("");
+      // eslint-disable-next-line
       setUserRole("");
       localStorage.removeItem("userRole");
     }
   }, [token]);
 
-  /* helper that always attaches authorization header */
-  const apiFetch = async (url, options = {}) => {
-    const hdrs = { ...(options.headers || {}) };
-    if (token) {
-      hdrs["Authorization"] = `Bearer ${token}`;
-    }
-    const resp = await fetch(url, { ...options, headers: hdrs });
-    if ((resp.status === 401 || resp.status === 403) && token) {
-      // token is invalid or expired, drop it and force re-login
-      setToken("");
-      localStorage.removeItem("token");
-    }
-    return resp;
-  };
-
-  /* Backend health check */
-  useEffect(() => {
-    const check = async () => {
-      try {
-        const r = await fetch("http://localhost:5000/health");
-        setBackendOnline(r.ok);
-      } catch {
-        setBackendOnline(false);
-      }
-    };
-    check();
-    // Check less frequently since data doesn't change quickly (every 30 seconds)
-    const timeout = setTimeout(() => setLoading(false), 5000);
-    const i = setInterval(check, 30000);
-    return () => {
-      clearInterval(i);
-      clearTimeout(timeout);
-    };
-  }, []);
-
-  /* Load devices */
-  useEffect(() => {
-    if (!backendOnline || !token) return;
-
-    // Reset all device data when user changes
-    setAllDeviceData({});
-    setDeviceHistory({});
-    setSelectedDeviceId("");
-    
-    setLoading(true);
-    apiFetch("http://localhost:5000/api/devices")
-      .then(r => {
-        if (!r.ok) throw new Error("Failed to fetch devices");
-        return r.json();
-      })
-      .then(d => {
-        console.log("Devices loaded:", d);
-        setDevices(d);
-        if (!selectedDeviceId && d.length > 0) {
-          setSelectedDeviceId(d[0].id);
-        }
-        setLoading(false);
-        setError(null);
-      })
-      .catch(err => {
-        console.error("Failed to load devices:", err);
-        setLoading(false);
-        setError("Could not connect to backend. Make sure the server is running.");
-      });
-  }, [backendOnline, token]);
-
-  /* Fetch alert settings for all devices */
-  useEffect(() => {
-    if (!backendOnline || !token || devices.length === 0) return;
-    
-    const fetchAlertSettings = async () => {
-      try {
-        const response = await apiFetch("http://localhost:5000/api/alerts");
-        if (response.ok) {
-          const data = await response.json();
-          const settingsMap = {};
-          data.forEach(s => { settingsMap[s.device_id] = s; });
-          setAlertSettings(settingsMap);
-        }
-      } catch (error) {
-        console.error("Error fetching alert settings:", error);
-      }
-    };
-    
-    fetchAlertSettings();
-  }, [backendOnline, token, devices.length]);
-
-  /* Fetch active alerts count */
-  useEffect(() => {
-    if (!backendOnline || !token) return;
-
-    const fetchAlertCount = async () => {
-      try {
-        const response = await apiFetch("http://localhost:5000/api/alerts/active");
-        if (response.ok) {
-          const data = await response.json();
-          setAlertCount(data.length);
-        }
-      } catch (error) {
-        console.error("Error fetching alert count:", error);
-      } finally {
-        setAlertLoading(false);
-      }
-    };
-
-    fetchAlertCount();
-    const alertInterval = setInterval(fetchAlertCount, 30000); // Update every 30 seconds
-    
-    return () => clearInterval(alertInterval);
-  }, [backendOnline, token]);
-
-  /* Fetch ALL device data continuously */
-  useEffect(() => {
-    if (!backendOnline || demoMode || devices.length === 0 || !token) return;
-
-    const intervalRef = { current: null };
-    
-    const fetchAllDeviceData = async () => {
-      try {
-        const r = await apiFetch("http://localhost:5000/api/all-devices-data");
-        const data = await r.json();
-        console.log("All device data fetched:", data);
-        
-        setAllDeviceData(data);
-        
-        Object.values(data).forEach(deviceData => {
-          if (deviceData.status === 'online' && deviceData.soil !== undefined) {
-            setDeviceHistory(prev => {
-              const deviceHist = prev[deviceData.id] || [];
-              const newEntry = {
-                ...deviceData,
-                time: new Date().toLocaleTimeString(),
-                created_at: deviceData.last_update || new Date()
-              };
-              return {
-                ...prev,
-                [deviceData.id]: [newEntry, ...deviceHist.slice(0, 49)]
-              };
-            });
-          }
-        });
-      } catch (err) {
-        console.error("Failed to fetch all device data:", err);
-        
-        const deviceDataMap = {};
-        const promises = devices.map(async (device) => {
-          try {
-            const r = await apiFetch(`http://localhost:5000/api/data/${device.id}`);
-            const json = await r.json();
-            return { deviceId: device.id, data: json, device };
-          } catch (e) {
-            return { deviceId: device.id, data: { offline: true }, device };
-          }
-        });
-        
-        const results = await Promise.all(promises);
-        results.forEach(({ deviceId, data, device }) => {
-          if (!data.offline) {
-            const entry = {
-              ...data,
-              time: new Date().toLocaleTimeString(),
-              deviceName: device.name || deviceId
-            };
-            deviceDataMap[deviceId] = entry;
-            
-            setDeviceHistory(prev => {
-              const deviceHist = prev[deviceId] || [];
-              return {
-                ...prev,
-                [deviceId]: [{ ...entry, created_at: new Date() }, ...deviceHist.slice(0, 49)]
-              };
-            });
-          }
-        });
-        setAllDeviceData(prev => ({ ...prev, ...deviceDataMap }));
-      }
-    };
-
-    fetchAllDeviceData();
-    intervalRef.current = setInterval(fetchAllDeviceData, 300000); // 5 minutes
-    
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [backendOnline, demoMode, devices.length]);
-
-  /* Demo Mode - Generate random data */
-  useEffect(() => {
-    if (!demoMode || devices.length === 0) return;
-
-    const intervalRef = { current: null };
-    
-    const generateDemoData = () => {
-      const baseConfigs = {
-        "device_1": { soil: 1800, temp: 28, hum: 60, rssi: -85 },
-        "device_2": { soil: 2200, temp: 32, hum: 45, rssi: -92 },
-        "device_3": { soil: 1500, temp: 25, hum: 70, rssi: -78 },
-      };
-
-      const newData = {};
-      
-      devices.forEach((device, idx) => {
-        const base = baseConfigs[device.id] || { 
-          soil: 1500 + idx * 300, 
-          temp: 25 + idx * 3, 
-          hum: 50 + idx * 10, 
-          rssi: -80 - idx * 5 
-        };
-        
-        const newEntry = {
-          soil: base.soil + Math.floor(Math.random() * 500) - 250,
-          temperature: base.temp + Math.floor(Math.random() * 6) - 3,
-          humidity: Math.max(0, Math.min(100, base.hum + Math.floor(Math.random() * 20) - 10)),
-          rssi: base.rssi + Math.floor(Math.random() * 10) - 5,
-          time: new Date().toLocaleTimeString(),
-          deviceName: device.name || device.id,
-          status: 'online'
-        };
-        
-        newData[device.id] = newEntry;
-        
-        setDeviceHistory(prev => {
-          const deviceHist = prev[device.id] || [];
-          return {
-            ...prev,
-            [device.id]: [{ ...newEntry, created_at: new Date() }, ...deviceHist.slice(0, 49)]
-          };
-        });
-      });
-
-      setAllDeviceData(newData);
-    };
-
-generateDemoData();
-    intervalRef.current = setInterval(generateDemoData, 10000); // Update every 10 seconds to reduce flickering
-    
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [demoMode, devices.length]);
-
-  const handleDeviceChange = (e) => {
-    const newDeviceId = e.target.value;
-    console.log("Dropdown changed to:", newDeviceId);
-    setSelectedDeviceId(newDeviceId);
-  };
-
-  const handleDeviceClick = (deviceId) => {
-    console.log("Device clicked from GPS map:", deviceId);
-    setSelectedDeviceId(deviceId);
-  };
-
-  const handleAddDevice = async () => {
-    setAddingDevice(true);
-    try {
-      // Use user-provided name or generate a default
-      const deviceName = newDeviceData.name || `Device_${Date.now()}`;
-      const response = await apiFetch("http://localhost:5000/api/devices", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: deviceName,
-          latitude: newDeviceData.latitude ? parseFloat(newDeviceData.latitude) : null,
-          longitude: newDeviceData.longitude ? parseFloat(newDeviceData.longitude) : null,
-          location_name: newDeviceData.location_name || null
-        })
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        console.log("Device added:", result);
-        
-        const devicesResponse = await apiFetch("http://localhost:5000/api/devices");
-        const devicesData = await devicesResponse.json();
-        setDevices(devicesData);
-        
-        setSelectedDeviceId(result.id);
-        
-        // Refresh the map to show the new device's GPS location
-        setMapRefreshKey(prev => prev + 1);
-        
-        setShowAddDeviceModal(false);
-        setNewDeviceData({ name: "", latitude: "", longitude: "", location_name: "" });
-        setAddPickMode(false);
-      }
-    } catch (error) {
-      console.error("Error adding device:", error);
-    }
-    setAddingDevice(false);
-  };
-
-  const handleDeleteDevice = async (deviceId, deviceName) => {
-    // Confirm before deleting
-    const confirmDelete = window.confirm(`Are you sure you want to delete "${deviceName || deviceId}"? This will also delete all sensor data for this device.`);
-    if (!confirmDelete) return;
-    
-    console.log("Deleting device:", deviceId);
-    
-    try {
-      const response = await apiFetch(`http://localhost:5000/api/devices/${deviceId}`, {
-        method: "DELETE"
-      });
-      
-      if (response.ok) {
-        console.log("Device deleted:", deviceId);
-        
-        // Refresh devices list
-        const devicesResponse = await apiFetch("http://localhost:5000/api/devices");
-        const devicesData = await devicesResponse.json();
-        setDevices(devicesData);
-        
-        // If the deleted device was selected, select another one
-        if (selectedDeviceId === deviceId) {
-          setSelectedDeviceId(devicesData.length > 0 ? devicesData[0].id : "");
-        }
-        
-        // Refresh the map
-        setMapRefreshKey(prev => prev + 1);
-      } else {
-        const error = await response.json();
-        alert("Failed to delete device: " + (error.error || "Unknown error"));
-      }
-    } catch (error) {
-      console.error("Error deleting device:", error);
-      alert("Error deleting device. Make sure you are the owner of this device.");
-    }
-  };
-
-  const getCardInfo = (title) => {
-    const info = {
-      "Soil": {
-        description: "Soil moisture sensor reading (ADC value)",
-        range: "0-4095 (12-bit ADC)",
-        tips: "Lower values indicate wetter soil, higher values mean drier soil"
-      },
-      "Temp": {
-        description: "Temperature reading from DHT sensor",
-        range: "-40°C to 80°C",
-        tips: "Optimal growth temperature for most plants: 18-24°C"
-      },
-      "Humidity": {
-        description: "Relative humidity percentage",
-        range: "0-100%",
-        tips: "Optimal humidity for plants: 40-60%"
-      },
-      "RSSI": {
-        description: "Received Signal Strength Indicator",
-        range: "-30 to -120 dBm",
-        tips: "Higher (closer to 0) is better. -50 dBm is excellent signal"
-      }
-    };
-    return info[title] || {};
-  };
-
-  const currentData = allDeviceData[selectedDeviceId] || null;
-  const history = deviceHistory[selectedDeviceId] || [];
-  const [fullHistory, setFullHistory] = useState([]);
-  const [timeRange, setTimeRange] = useState('24h'); // Default to 24 hours
-
-  useEffect(() => {
-    if (!selectedDeviceId) return;
-    apiFetch(`http://localhost:5000/api/history/${selectedDeviceId}?range=${timeRange}`)
-      .then(r => r.json())
-      .then(data => {
-        // the server returns oldest first
-        setFullHistory(data || []);
-      })
-      .catch(err => console.error('Failed to load full history', err));
-  }, [selectedDeviceId, timeRange]);
-  const onlineDevices = Object.values(allDeviceData).filter(d => d.status === 'online').length;
-
-  // if user not logged in show landing page with auth modal
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  
-  if (!token) {
-    return (
-      <div className="landing-page">
-        {/* Header */}
-        <header className="landing-header">
-          <div className="landing-logo">
-            <span className="logo-icon">📡</span>
-            <span className="logo-text">LoRa Soil Monitor</span>
-          </div>
-          <nav className="landing-nav">
-            <a href="#home" className="nav-link">Home</a>
-            <a href="#features" className="nav-link">Features</a>
-            <a href="#how-it-works" className="nav-link">How It Works</a>
-            <a href="#about" className="nav-link">About</a>
-            <a href="#contact" className="nav-link">Contact</a>
-          </nav>
-          <div className="landing-auth-buttons">
-            <button className="btn-login" onClick={() => { setAuthMode("login"); setShowAuthModal(true); setAuthError(null); }}>
-              Login
-            </button>
-            <button className="btn-signup" onClick={() => { setAuthMode("register"); setShowAuthModal(true); setAuthError(null); }}>
-              Sign Up
-            </button>
-          </div>
-        </header>
-
-        {/* Hero Section */}
-        <section id="home" className="landing-hero">
-          <div className="hero-bg-pattern"></div>
-          <div className="hero-content-landing">
-            <h1>Smart Agriculture Through<br /><span className="gradient-text">IoT Innovation</span></h1>
-            <p className="hero-subtitle">Monitor your soil conditions in real-time with LoRa technology. Make data-driven decisions for healthier crops and higher yields.</p>
-            <div className="hero-buttons">
-              <button className="btn-primary" onClick={() => { setAuthMode("register"); setShowAuthModal(true); setAuthError(null); }}>
-                Get Started Free <span>→</span>
-              </button>
-              <button className="btn-secondary" onClick={() => document.getElementById('features').scrollIntoView({ behavior: 'smooth' })}>
-                Learn More
-              </button>
-            </div>
-            <div className="hero-stats-landing">
-              <div className="stat-item">
-                <span className="stat-value">500+</span>
-                <span className="stat-label">Active Sensors</span>
-              </div>
-              <div className="stat-divider"></div>
-              <div className="stat-item">
-                <span className="stat-value">99.9%</span>
-                <span className="stat-label">Uptime</span>
-              </div>
-              <div className="stat-divider"></div>
-              <div className="stat-item">
-                <span className="stat-value">24/7</span>
-                <span className="stat-label">Monitoring</span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Features Section */}
-        <section id="features" className="features-section">
-          <div className="section-header">
-            <h2>Powerful Features</h2>
-            <p>Everything you need to monitor and manage your agricultural sensors</p>
-          </div>
-          <div className="features-grid">
-            <div className="feature-card">
-              <div className="feature-icon-large">🌱</div>
-              <h3>Soil Monitoring</h3>
-              <p>Track soil moisture, temperature, and humidity in real-time. Get accurate readings from multiple sensors across your fields.</p>
-            </div>
-            <div className="feature-card">
-              <div className="feature-icon-large">📊</div>
-              <h3>Data Visualization</h3>
-              <p>Beautiful interactive charts and graphs. View historical data, analyze trends, and export reports for better decision making.</p>
-            </div>
-            <div className="feature-card">
-              <div className="feature-icon-large">🔔</div>
-              <h3>Smart Alerts</h3>
-              <p>Configure custom thresholds and receive instant notifications via the dashboard when conditions need attention.</p>
-            </div>
-            <div className="feature-card">
-              <div className="feature-icon-large">🗺️</div>
-              <h3>GPS Tracking</h3>
-              <p>Visualize all your devices on an interactive map. Know the exact location of every sensor in your network.</p>
-            </div>
-            <div className="feature-card">
-              <div className="feature-icon-large">📡</div>
-              <h3>LoRa Technology</h3>
-              <p>Long-range wireless communication with low power consumption. Connect sensors kilometers away from the gateway.</p>
-            </div>
-            <div className="feature-card">
-              <div className="feature-icon-large">🔒</div>
-              <h3>Secure Access</h3>
-              <p>Role-based access control ensures data security. Manage team members with admin and user permissions.</p>
-            </div>
-          </div>
-        </section>
-
-        {/* How It Works Section */}
-        <section id="how-it-works" className="how-it-works-section">
-          <div className="section-header">
-            <h2>How It Works</h2>
-            <p>Get started in three simple steps</p>
-          </div>
-          <div className="steps-container">
-            <div className="step-item">
-              <div className="step-number">1</div>
-              <h3>Create Account</h3>
-              <p>Sign up for free and create your dashboard</p>
-            </div>
-            <div className="step-connector"></div>
-            <div className="step-item">
-              <div className="step-number">2</div>
-              <h3>Add Devices</h3>
-              <p>Register your LoRa sensors to your account</p>
-            </div>
-            <div className="step-connector"></div>
-            <div className="step-item">
-              <div className="step-number">3</div>
-              <h3>Start Monitoring</h3>
-              <p>View real-time data and configure alerts</p>
-            </div>
-          </div>
-        </section>
-
-        {/* CTA Section */}
-        <section className="cta-section">
-          <div className="cta-content">
-            <h2>Ready to Transform Your Agriculture?</h2>
-            <p>Join thousands of farmers already using IoT to improve their yield</p>
-            <button className="btn-primary btn-large" onClick={() => { setAuthMode("register"); setShowAuthModal(true); setAuthError(null); }}>
-              Start Free Today <span>→</span>
-            </button>
-          </div>
-        </section>
-
-        {/* Footer */}
-        <footer id="contact" className="landing-footer">
-          <div className="footer-content">
-            <div className="footer-brand">
-              <div className="landing-logo">
-                <span className="logo-icon">📡</span>
-                <span className="logo-text">LoRa Soil Monitor</span>
-              </div>
-              <p>Real-time IoT sensor monitoring for smart agriculture</p>
-            </div>
-            <div className="footer-links">
-              <div className="footer-column">
-                <h4>Product</h4>
-                <a href="#features">Features</a>
-                <a href="#how-it-works">How It Works</a>
-                <a href="#">Pricing</a>
-              </div>
-              <div className="footer-column">
-                <h4>Company</h4>
-                <a href="#about">About</a>
-                <a href="#contact">Contact</a>
-                <a href="#">Careers</a>
-              </div>
-              <div className="footer-column">
-                <h4>Support</h4>
-                <a href="#">Documentation</a>
-                <a href="#">API</a>
-                <a href="#">Status</a>
-              </div>
-            </div>
-          </div>
-          <div className="footer-bottom">
-            <p>&copy; 2024 LoRa Soil Monitor. All rights reserved.</p>
-          </div>
-        </footer>
-
-        {/* Auth Modal */}
-        {showAuthModal && (
-          <div className="modal-overlay" onClick={() => setShowAuthModal(false)}>
-            <div className="auth-modal" onClick={(e) => e.stopPropagation()}>
-              <button className="modal-close" onClick={() => setShowAuthModal(false)}>×</button>
-              <div className="auth-modal-header">
-                <h2>{authMode === "login" ? "Welcome Back" : "Create Account"}</h2>
-                <p>{authMode === "login" ? "Sign in to your dashboard" : "Start your free account"}</p>
-              </div>
-              
-              <div className="auth-modal-tabs">
-                <button 
-                  className={`auth-modal-tab ${authMode === "login" ? "active" : ""}`}
-                  onClick={() => { setAuthMode("login"); setAuthError(null); }}
-                >
-                  Login
-                </button>
-                <button 
-                  className={`auth-modal-tab ${authMode === "register" ? "active" : ""}`}
-                  onClick={() => { setAuthMode("register"); setAuthError(null); }}
-                >
-                  Sign Up
-                </button>
-              </div>
-              
-              <form 
-                className="auth-modal-form"
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  setAuthError(null);
-                  const url = authMode === "login" ? "/api/login" : "/api/register";
-                  try {
-                    const r = await fetch("http://localhost:5000" + url, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        username: authUser,
-                        password: authPass,
-                      }),
-                    });
-                    const data = await r.json();
-                    if (!r.ok) {
-                      throw new Error(data.error || "Authentication failed");
-                    }
-                    if (authMode === "login") {
-                      setToken(data.token);
-                      localStorage.setItem("token", data.token);
-                      setShowAuthModal(false);
-                    } else {
-                      setAuthMode("login");
-                      setAuthError("Registration successful! Please sign in.");
-                    }
-                  } catch (err) {
-                    console.error("Auth error", err);
-                    setAuthError(err.message);
-                  }
-                }}
-              >
-                <div className="form-group-modal">
-                  <label>Username</label>
-                  <input
-                    type="text"
-                    placeholder="Enter your username"
-                    value={authUser}
-                    onChange={(e) => setAuthUser(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="form-group-modal">
-                  <label>Password</label>
-                  <div className="password-input-wrapper">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      placeholder="Enter your password"
-                      value={authPass}
-                      onChange={(e) => setAuthPass(e.target.value)}
-                      required
-                    />
-                    <button 
-                      type="button" 
-                      className="password-toggle"
-                      onClick={() => setShowPassword(!showPassword)}
-                    >
-                      {showPassword ? (
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                          <line x1="1" y1="1" x2="23" y2="23"></line>
-                        </svg>
-                      ) : (
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                          <circle cx="12" cy="12" r="3"></circle>
-                        </svg>
-                      )}
-                    </button>
-                  </div>
-                </div>
-                {authError && <div className="auth-error-modal">{authError}</div>}
-                <button type="submit" className="auth-modal-submit">
-                  {authMode === "login" ? "Sign In" : "Create Account"}
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="page">
-        <div className="loading">
-          <h2>Loading Dashboard...</h2>
-          <p>Connecting to backend on http://localhost:5000</p>
-          <p style={{marginTop: "20px", fontSize: "12px", color: "#94a3b8"}}>Backend Online: {backendOnline ? "Yes" : "No"}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="page">
-        <div className="error-container">
-          <h2>Connection Error</h2>
-          <p>{error}</p>
-          <div className="error-steps">
-            <p><strong>To fix this:</strong></p>
-            <ol>
-              <li>Make sure MySQL is running</li>
-              <li>Start the backend: <code>cd backend && npm start</code></li>
-              <li>Refresh this page</li>
-            </ol>
-          </div>
-          <button className="demo-btn" onClick={() => { setError(null); setDemoMode(true); }}>
-            Try Demo Mode Anyway
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="page">
-      {viewingDeviceDetail && selectedDeviceId && (
-        <DeviceDetail
-          device={devices.find(d => d.id === selectedDeviceId) || {}}
-          data={allDeviceData[selectedDeviceId]}
-          history={deviceHistory[selectedDeviceId] || []}
-          fullHistory={fullHistory}
-          onBack={() => setViewingDeviceDetail(false)}
-        />
-      )}
-
-      {!viewingDeviceDetail && (
-        <>
-      <header className="dashboard-header">
-<div className="dashboard-brand">
-          <span className="brand-icon">📡</span>
-          <div className="brand-text">
-            <h1>LoRa Monitor</h1>
-            <span className="brand-tagline">Smart Agriculture</span>
-          </div>
-        </div>
-        
-        <div className="dashboard-nav">
-{/* Demo Mode Button - Always visible in header */}
-          <button 
-            className={`demo-btn ${demoMode ? 'active' : ''}`}
-            onClick={() => setDemoMode(!demoMode)}
-            style={{ marginRight: '10px' }}
-          >
-            {demoMode ? 'Demo: ON' : 'Demo Mode'}
-          </button>
-          
-          <button 
-            className="add-device-btn" 
-            onClick={() => setShowAddDeviceModal(true)}
-            style={{ marginRight: '10px' }}
-          >
-            + Add Device
-          </button>
-          
-          <div className="view-toggle" style={{ marginRight: '10px' }}>
-            <button 
-              className={`view-toggle-btn ${viewMode === 'single' ? 'active' : ''}`}
-              onClick={() => setViewMode('single')}
-            >
-              Single
-            </button>
-            <button 
-              className={`view-toggle-btn ${viewMode === 'all' ? 'active' : ''}`}
-              onClick={() => setViewMode('all')}
-            >
-              All Devices
-            </button>
-          </div>
-          
-          <select value={selectedDeviceId} onChange={handleDeviceChange} className="device-dropdown">
-            {devices.map(d => (
-              <option key={d.id} value={d.id}>
-                {d.name || d.id}
-              </option>
-            ))}
-          </select>
-          
-          <select value={timeRange} onChange={(e) => setTimeRange(e.target.value)} className="time-dropdown">
-            <option value="1h">Last 1 Hour</option>
-            <option value="6h">Last 6 Hours</option>
-            <option value="24h">Last 24 Hours</option>
-            <option value="7d">Last 7 Days</option>
-            <option value="30d">Last 30 Days</option>
-          </select>
-
-          {userRole === "admin" && (
-            <a href="/admin" className="nav-btn" style={{ marginLeft: '10px' }}>
-              Admin
-            </a>
-          )}
-          
-<button className="nav-btn" onClick={() => setShowAlertPanel(true)} style={{ marginLeft: '10px' }}>
-            Alerts {alertCount > 0 && <span className="nav-badge">{alertCount}</span>}
-          </button>
-          
-          <button className="nav-btn" onClick={() => setShowReports(true)} style={{ marginLeft: '10px' }}>
-            📊 Reports
-          </button>
-          
-          <button className="nav-btn logout-btn" onClick={() => {
-            setToken("");
-            localStorage.removeItem("token");
-            setDevices([]);
-          }}>
-            Logout
-          </button>
-          
-          <span className={`status-dot ${backendOnline ? "online" : "offline"}`} title={backendOnline ? "Connected" : "Disconnected"}></span>
-        </div>
-      </header>
-
-      {showMap && (
-        <GPSMap
-          devices={devices}
-          onDeviceClick={handleDeviceClick}
-          selectedDevice={selectedDeviceId}
-          addPickMode={addPickMode}
-          refreshKey={mapRefreshKey}
-          onNewLocationPick={(lat, lng) => {
-            setNewDeviceData(prev => ({
-              ...prev,
-              latitude: lat.toString(),
-              longitude: lng.toString()
-            }));
-            setAddPickMode(false);
-          }}
-          onDeviceNameClick={(deviceId) => {
-            setSelectedDeviceId(deviceId);
-            setViewingDeviceDetail(true);
-          }}
-          onDeleteDevice={handleDeleteDevice}
-        />
-      )}
-
-      <div className="dashboard-content">
-        {viewMode === 'all' ? (
-          <div className="all-devices-view">
-<MultiDeviceChart devices={devices} allDeviceData={allDeviceData} deviceHistory={deviceHistory} alertSettings={alertSettings} />
-          </div>
-        ) : (
-        <>
-{/* Stats Cards - Soil, Temperature, Humidity, RSSI */}
-        <div className="stats-row">
-          <div className="stat-box">
-            <span className="stat-icon">Soil</span>
-            <div className="stat-info">
-              <span className="stat-value">{currentData?.soil || "--"}</span>
-              <span className="stat-label">Moisture</span>
-            </div>
-          </div>
-          <div className="stat-box">
-            <span className="stat-icon">Temp</span>
-            <div className="stat-info">
-              <span className="stat-value">{currentData?.temperature ? `${currentData.temperature}°C` : "--"}</span>
-              <span className="stat-label">Temperature</span>
-            </div>
-          </div>
-          <div className="stat-box">
-            <span className="stat-icon">Hum</span>
-            <div className="stat-info">
-              <span className="stat-value">{currentData?.humidity ? `${currentData.humidity}%` : "--"}</span>
-              <span className="stat-label">Humidity</span>
-            </div>
-          </div>
-          <div className="stat-box">
-            <span className="stat-icon">RSSI</span>
-            <div className="stat-info">
-              <span className="stat-value">{currentData?.rssi || "--"}</span>
-              <span className="stat-label">Signal</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Charts Section */}
-        <div className="charts-section">
-          <SensorChart title="Soil Moisture" data={history} dataKey="soil" color="#22c55e" unit="ADC" />
-          <SensorChart title="Temperature" data={history} dataKey="temperature" color="#f97316" unit="°C" />
-          <SensorChart title="Humidity" data={history} dataKey="humidity" color="#38bdf8" unit="%" />
-        </div>
-        </>
-        )}
-
-        <div className="data-section">
-          <h3 className="section-title">Recent Readings</h3>
-          <DataTable data={fullHistory.length > 0 ? fullHistory : history} showFull={false} />
-        </div>
-      </div>
-
-{/* Alert Panel Modal */}
-      {showAlertPanel && (
-        <div className="modal-overlay" onClick={() => setShowAlertPanel(false)}>
-          <div className="alert-modal-content" onClick={(e) => e.stopPropagation()}>
-            <AlertPanel 
-              devices={devices} 
-              onClose={() => setShowAlertPanel(false)} 
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Reports Modal */}
-      {showReports && (
-        <div className="modal-overlay" onClick={() => setShowReports(false)}>
-          <div className="reports-modal-content" onClick={(e) => e.stopPropagation()}>
-            <Reports 
-              token={token} 
-              onBack={() => setShowReports(false)} 
-            />
-          </div>
-        </div>
-      )}
-      
-      {/* Add Device Modal */}
-      {showAddDeviceModal && (
-        <div className="modal-overlay" onClick={() => { setShowAddDeviceModal(false); setAddPickMode(false); }}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Add New Device</h2>
-              <button className="modal-close" onClick={() => { setShowAddDeviceModal(false); setAddPickMode(false); }}>×</button>
-            </div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label>Device Name *</label>
-                <input type="text" placeholder="e.g., Sensor 1" value={newDeviceData.name}
-                  onChange={(e) => setNewDeviceData({...newDeviceData, name: e.target.value})} required />
-              </div>
-              <div className="form-group">
-                <label>Location</label>
-                <input type="text" placeholder="e.g., Greenhouse" value={newDeviceData.location_name}
-                  onChange={(e) => setNewDeviceData({...newDeviceData, location_name: e.target.value})} />
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Latitude</label>
-                  <input type="number" step="any" placeholder="13.0823" value={newDeviceData.latitude}
-                    onChange={(e) => setNewDeviceData({...newDeviceData, latitude: e.target.value})} />
-                </div>
-                <div className="form-group">
-                  <label>Longitude</label>
-                  <input type="number" step="any" placeholder="80.2707" value={newDeviceData.longitude}
-                    onChange={(e) => setNewDeviceData({...newDeviceData, longitude: e.target.value})} />
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-cancel" onClick={() => setShowAddDeviceModal(false)}>Cancel</button>
-              <button className="btn-add" onClick={handleAddDevice} disabled={addingDevice}>
-                {addingDevice ? "Adding..." : "Add Device"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      </>
-      )}
-    </div>
-  );
-}
-
-// App component with routing
-export default function App() {
-  const token = localStorage.getItem("token") || "";
-  const userRole = localStorage.getItem("userRole") || "";
-  
-  // Helper function to create apiFetch with token
   const createApiFetch = (authToken) => {
     return async (url, options = {}) => {
       const hdrs = { ...(options.headers || {}) };
       if (authToken) {
         hdrs["Authorization"] = `Bearer ${authToken}`;
       }
-      const resp = await fetch(url, { ...options, headers: hdrs });
-      return resp;
+      return fetch(url, { ...options, headers: hdrs });
     };
   };
+
+  const apiFetch = createApiFetch(token);
 
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route 
-          path="/admin" 
+        <Route path="/" element={
+          token ?
+            <DashboardLayout token={token} setToken={setToken} userRole={userRole} apiFetch={apiFetch} /> :
+            <Landing setToken={setToken} setUserRole={setUserRole} />
+        } />
+        <Route
+          path="/admin"
           element={
-            token && userRole === "admin" ? 
-              <Admin token={token} apiFetch={createApiFetch(token)} /> : 
+            token && userRole === "admin" ?
+              <Admin token={token} apiFetch={apiFetch} /> :
               <Navigate to="/" />
-          } 
+          }
         />
       </Routes>
     </BrowserRouter>
   );
 }
-

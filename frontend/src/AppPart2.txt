@@ -1,0 +1,377 @@
+// ─── Pages ──────────────────────────────────────────────────────────────────
+
+const PageDashboard = ({ state, dispatch }) => {
+  const { sensors, pump, lights, nodes } = state;
+  const onlineNodes = nodes.filter(n => n.online).length;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Farm Overview</h1>
+          <p style={{ color: C.textMuted, fontSize: 13, margin: "4px 0 0" }}>Real-time agricultural monitoring · Updated {new Date().toLocaleTimeString()}</p>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Badge label={`${onlineNodes}/${nodes.length} NODES ACTIVE`} color={C.green} />
+          <Badge label="LORA GATEWAY ●" color={C.blue} />
+        </div>
+      </div>
+
+      {/* System Status Bar */}
+      <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 10, padding: "12px 20px", display: "flex", gap: 24, flexWrap: "wrap" }}>
+        {[
+          { label: "Pump", value: pump ? "RUNNING" : "IDLE", color: pump ? C.green : C.textMuted },
+          { label: "Lights", value: lights ? "ON" : "OFF", color: lights ? C.amber : C.textMuted },
+          { label: "Active Nodes", value: `${onlineNodes} / ${nodes.length}`, color: C.blue },
+          { label: "Last Update", value: new Date().toLocaleTimeString(), color: C.textMuted },
+        ].map(s => (
+          <div key={s.label} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span style={{ color: C.textSub, fontSize: 10, letterSpacing: 1, textTransform: "uppercase" }}>{s.label}</span>
+            <span style={{ color: s.color, fontSize: 13, fontWeight: 700, fontFamily: "monospace" }}>{s.value}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Sensor Cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}>
+        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ padding: "16px 18px 8px" }}>
+            <MetricCard icon="temp" label="Temperature" value={sensors.temp.toFixed(1)} unit="°C" color={C.amber} trend={0.4} />
+          </div>
+          <Spark data={state.history.temp} color={C.amber} />
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ padding: "16px 18px 8px" }}>
+            <MetricCard icon="moisture" label="Soil Moisture" value={sensors.moisture.toFixed(1)} unit="%" color={C.green} trend={-1.2} />
+          </div>
+          <Spark data={state.history.moisture} color={C.green} />
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ padding: "16px 18px 8px" }}>
+            <MetricCard icon="humidity" label="Humidity" value={sensors.humidity.toFixed(1)} unit="%" color={C.blue} trend={0.8} />
+          </div>
+          <Spark data={state.history.humidity} color={C.blue} />
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ padding: "16px 18px 8px" }}>
+            <MetricCard icon="light" label="Light Intensity" value={Math.round(sensors.light)} unit="lux" color="#a78bfa" trend={-120} />
+          </div>
+          <Spark data={state.history.light} color="#a78bfa" />
+        </div>
+      </div>
+
+      {/* Quick Actions */}
+      <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "20px 22px" }}>
+        <h3 style={{ color: C.text, fontSize: 14, fontWeight: 700, margin: "0 0 16px", letterSpacing: 1, textTransform: "uppercase" }}>Quick Actions</h3>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <Btn label="Start Pump" icon="pump" color={C.green} onClick={() => dispatch({ type: "SET_PUMP", val: true })} disabled={pump} />
+          <Btn label="Stop Pump" icon="pump" color={C.red} onClick={() => dispatch({ type: "SET_PUMP", val: false })} disabled={!pump} />
+          <Btn label="Lights ON" icon="light" color={C.amber} onClick={() => dispatch({ type: "SET_LIGHTS", val: true })} disabled={lights} />
+          <Btn label="Lights OFF" icon="light" color={C.textMuted} onClick={() => dispatch({ type: "SET_LIGHTS", val: false })} disabled={!lights} />
+        </div>
+        {pump && <div style={{ marginTop: 10, color: C.green, fontSize: 12 }}>● Borewell pump is currently running – irrigation active</div>}
+      </div>
+    </div>
+  );
+};
+
+const PageSensors = ({ state }) => {
+  const nodeData = state.nodes.map((n, i) => ({
+    ...n,
+    temp: (28 + i * 1.3 + Math.random() * 2).toFixed(1),
+    moisture: (22 + i * 4 - Math.random() * 3).toFixed(1),
+    humidity: (60 + i * 2 + Math.random() * 5).toFixed(1),
+    light: Math.round(3200 + i * 400 - Math.random() * 300),
+    lastTx: new Date(Date.now() - i * 4 * 60000).toLocaleTimeString(),
+  }));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Sensor Nodes</h1>
+      <p style={{ color: C.textMuted, fontSize: 13, margin: "-12px 0 0" }}>Live readings from {state.nodes.length} LoRa sensor nodes across the farm</p>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+              {["Node ID", "Soil Moisture", "Temperature", "Humidity", "Light (lux)", "Last TX", "Status"].map(h => (
+                <th key={h} style={{ color: C.textSub, fontSize: 11, letterSpacing: 1, textAlign: "left", padding: "10px 14px", fontWeight: 700, textTransform: "uppercase" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {nodeData.map((n, i) => (
+              <tr key={n.id} style={{ borderBottom: `1px solid ${C.cardBorder}`, background: i % 2 === 0 ? "transparent" : C.card + "88" }}>
+                <td style={{ padding: "12px 14px", color: C.green, fontWeight: 700, fontFamily: "monospace" }}>{n.id}</td>
+                <td style={{ padding: "12px 14px", color: C.text }}>
+                  <span style={{ color: parseFloat(n.moisture) < 25 ? C.red : C.green }}>{n.moisture}%</span>
+                </td>
+                <td style={{ padding: "12px 14px", color: C.text }}>
+                  <span style={{ color: parseFloat(n.temp) > 35 ? C.red : C.amber }}>{n.temp}°C</span>
+                </td>
+                <td style={{ padding: "12px 14px", color: C.blue }}>{n.humidity}%</td>
+                <td style={{ padding: "12px 14px", color: "#a78bfa" }}>{n.light}</td>
+                <td style={{ padding: "12px 14px", color: C.textMuted, fontFamily: "monospace", fontSize: 12 }}>{n.lastTx}</td>
+                <td style={{ padding: "12px 14px" }}><StatusDot online={n.online} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+const PageIrrigation = ({ state, dispatch }) => {
+  const { autoMode, minMoisture, maxMoisture, pump, sensors } = state;
+  const [localMin, setLocalMin] = useState(minMoisture);
+  const [localMax, setLocalMax] = useState(maxMoisture);
+
+  const save = () => {
+    dispatch({ type: "SET_THRESHOLDS", min: parseFloat(localMin), max: parseFloat(localMax) });
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Automatic Irrigation Control</h1>
+
+      {/* Auto Mode Toggle */}
+      <div style={{ background: C.card, border: `1px solid ${autoMode ? C.green + "66" : C.cardBorder}`, borderRadius: 12, padding: "20px 22px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <div style={{ color: C.text, fontSize: 15, fontWeight: 700 }}>Automatic Mode</div>
+          <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4 }}>System will auto-control the pump based on soil moisture thresholds</div>
+        </div>
+        <button onClick={() => dispatch({ type: "TOGGLE_AUTO" })}
+          style={{ background: autoMode ? C.green + "33" : C.card, border: `2px solid ${autoMode ? C.green : C.textSub}`, borderRadius: 30, padding: "8px 20px", color: autoMode ? C.green : C.textMuted, fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all .2s", letterSpacing: 0.5 }}>
+          {autoMode ? "● AUTO MODE ON" : "○ AUTO MODE OFF"}
+        </button>
+      </div>
+
+      {/* Thresholds */}
+      <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "20px 22px" }}>
+        <h3 style={{ color: C.text, fontSize: 14, fontWeight: 700, margin: "0 0 16px", textTransform: "uppercase", letterSpacing: 1 }}>Moisture Thresholds</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, maxWidth: 420 }}>
+          <div>
+            <label style={{ color: C.textMuted, fontSize: 11, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 6 }}>Min (Pump ON below)</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input type="number" value={localMin} onChange={e => setLocalMin(e.target.value)} min={0} max={100}
+                style={{ background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 6, padding: "8px 12px", color: C.green, fontSize: 16, fontWeight: 700, fontFamily: "monospace", width: 80, outline: "none" }} />
+              <span style={{ color: C.textMuted }}>%</span>
+            </div>
+          </div>
+          <div>
+            <label style={{ color: C.textMuted, fontSize: 11, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 6 }}>Max (Pump OFF above)</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input type="number" value={localMax} onChange={e => setLocalMax(e.target.value)} min={0} max={100}
+                style={{ background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 6, padding: "8px 12px", color: C.green, fontSize: 16, fontWeight: 700, fontFamily: "monospace", width: 80, outline: "none" }} />
+              <span style={{ color: C.textMuted }}>%</span>
+            </div>
+          </div>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <Btn label="Save Thresholds" color={C.green} onClick={save} />
+        </div>
+      </div>
+
+      {/* Logic Display */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, maxWidth: 600 }}>
+        <div style={{ background: C.card, border: `1px solid ${C.red}33`, borderRadius: 10, padding: 16 }}>
+          <div style={{ color: C.red, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>Pump ON Condition</div>
+          <div style={{ color: C.text, fontFamily: "monospace", fontSize: 13 }}>Moisture &lt; <span style={{ color: C.green }}>{state.minMoisture}%</span></div>
+          <div style={{ color: C.textMuted, fontSize: 11, marginTop: 6 }}>Current: <span style={{ color: C.green }}>{state.sensors.moisture.toFixed(1)}%</span>
+            {state.sensors.moisture < state.minMoisture && <span style={{ color: C.red }}> · CONDITION MET</span>}
+          </div>
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.green}33`, borderRadius: 10, padding: 16 }}>
+          <div style={{ color: C.green, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>Pump OFF Condition</div>
+          <div style={{ color: C.text, fontFamily: "monospace", fontSize: 13 }}>Moisture &gt; <span style={{ color: C.amber }}>{state.maxMoisture}%</span></div>
+          <div style={{ color: C.textMuted, fontSize: 11, marginTop: 6 }}>Current: <span style={{ color: C.green }}>{state.sensors.moisture.toFixed(1)}%</span>
+            {state.sensors.moisture > state.maxMoisture && <span style={{ color: C.amber }}> · CONDITION MET</span>}
+          </div>
+        </div>
+      </div>
+
+      {/* Gauge */}
+      <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "20px 22px" }}>
+        <div style={{ color: C.textMuted, fontSize: 11, letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>Current Soil Moisture</div>
+        <div style={{ position: "relative", height: 18, background: C.surface, borderRadius: 9, overflow: "hidden" }}>
+          <div style={{ position: "absolute", left: `${state.minMoisture}%`, top: 0, bottom: 0, width: 2, background: C.red, zIndex: 2 }} />
+          <div style={{ position: "absolute", left: `${state.maxMoisture}%`, top: 0, bottom: 0, width: 2, background: C.amber, zIndex: 2 }} />
+          <div style={{ height: "100%", width: `${state.sensors.moisture}%`, background: `linear-gradient(90deg, ${C.green}88, ${C.green})`, borderRadius: 9, transition: "width 1s" }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.textSub, marginTop: 4 }}>
+          <span>0%</span><span style={{ color: C.red }}>▲ Min {state.minMoisture}%</span><span style={{ color: C.amber }}>▲ Max {state.maxMoisture}%</span><span>100%</span>
+        </div>
+        <div style={{ marginTop: 10, color: C.green, fontSize: 22, fontWeight: 800, fontFamily: "monospace" }}>{state.sensors.moisture.toFixed(1)}%</div>
+        <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4 }}>Pump Status: <span style={{ color: pump ? C.green : C.textMuted, fontWeight: 700 }}>{pump ? "RUNNING" : "IDLE"}</span></div>
+      </div>
+    </div>
+  );
+};
+
+const PagePump = ({ state, dispatch }) => {
+  const { pump, lights } = state;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Pump & Lighting Control</h1>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, maxWidth: 700 }}>
+        {/* Pump */}
+        <div style={{ background: C.card, border: `1px solid ${pump ? C.green + "55" : C.cardBorder}`, borderRadius: 14, padding: "28px 24px", display: "flex", flexDirection: "column", gap: 18, alignItems: "center", textAlign: "center" }}>
+          <div style={{ width: 72, height: 72, borderRadius: "50%", border: `2px solid ${pump ? C.green : C.cardBorder}`, display: "flex", alignItems: "center", justifyContent: "center", background: pump ? C.green + "22" : "transparent", boxShadow: pump ? `0 0 24px ${C.green}44` : "none", transition: "all .3s" }}>
+            <Icon name="pump" size={32} color={pump ? C.green : C.textSub} />
+          </div>
+          <div>
+            <div style={{ color: C.text, fontSize: 16, fontWeight: 700 }}>Borewell Pump</div>
+            <div style={{ color: pump ? C.green : C.textMuted, fontSize: 13, fontWeight: 700, marginTop: 4, fontFamily: "monospace" }}>● {pump ? "RUNNING" : "IDLE"}</div>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+            <Btn label="Start" color={C.green} onClick={() => dispatch({ type: "SET_PUMP", val: true })} disabled={pump} />
+            <Btn label="Stop" color={C.red} onClick={() => dispatch({ type: "SET_PUMP", val: false })} disabled={!pump} />
+          </div>
+          {pump && <div style={{ color: C.textMuted, fontSize: 11 }}>Running since {new Date(Date.now() - 8 * 60000).toLocaleTimeString()}</div>}
+        </div>
+        {/* Lights */}
+        <div style={{ background: C.card, border: `1px solid ${lights ? C.amber + "55" : C.cardBorder}`, borderRadius: 14, padding: "28px 24px", display: "flex", flexDirection: "column", gap: 18, alignItems: "center", textAlign: "center" }}>
+          <div style={{ width: 72, height: 72, borderRadius: "50%", border: `2px solid ${lights ? C.amber : C.cardBorder}`, display: "flex", alignItems: "center", justifyContent: "center", background: lights ? C.amber + "22" : "transparent", boxShadow: lights ? `0 0 24px ${C.amber}44` : "none", transition: "all .3s" }}>
+            <Icon name="light" size={32} color={lights ? C.amber : C.textSub} />
+          </div>
+          <div>
+            <div style={{ color: C.text, fontSize: 16, fontWeight: 700 }}>Field Lighting</div>
+            <div style={{ color: lights ? C.amber : C.textMuted, fontSize: 13, fontWeight: 700, marginTop: 4, fontFamily: "monospace" }}>● {lights ? "ON" : "OFF"}</div>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+            <Btn label="Turn ON" color={C.amber} onClick={() => dispatch({ type: "SET_LIGHTS", val: true })} disabled={lights} />
+            <Btn label="Turn OFF" color={C.textMuted} onClick={() => dispatch({ type: "SET_LIGHTS", val: false })} disabled={!lights} />
+          </div>
+        </div>
+      </div>
+      {/* Command Log */}
+      <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "18px 20px" }}>
+        <div style={{ color: C.textMuted, fontSize: 11, letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>Recent Commands</div>
+        {[
+          { t: "10:44 AM", msg: "Pump started via Auto Irrigation", by: "system" },
+          { t: "10:30 AM", msg: "Pump stopped manually", by: "admin" },
+          { t: "10:00 AM", msg: "Lights turned OFF", by: "admin" },
+          { t: "06:00 AM", msg: "Lights turned ON", by: "schedule" },
+        ].map((l, i) => (
+          <div key={i} style={{ display: "flex", gap: 12, borderBottom: `1px solid ${C.cardBorder}`, padding: "8px 0", fontSize: 13 }}>
+            <span style={{ color: C.textSub, fontFamily: "monospace", fontSize: 11, minWidth: 70 }}>{l.t}</span>
+            <span style={{ color: C.text, flex: 1 }}>{l.msg}</span>
+            <Badge label={l.by} color={l.by === "system" ? C.green : l.by === "schedule" ? C.blue : C.amber} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const PageMap = ({ state }) => {
+  const fieldPositions = [
+    { id: "NODE-01", x: 30, y: 20, name: "Field A – North" },
+    { id: "NODE-02", x: 65, y: 35, name: "Field B – East" },
+    { id: "NODE-03", x: 20, y: 60, name: "Field C – West" },
+    { id: "NODE-04", x: 55, y: 70, name: "Field D – South" },
+    { id: "NODE-05", x: 75, y: 55, name: "Greenhouse" },
+  ];
+  const [selected, setSelected] = useState(null);
+
+  const nodeDetails = (id) => {
+    const idx = parseInt(id.split("-")[1]) - 1;
+    return {
+      temp: (28 + idx * 1.3).toFixed(1),
+      moisture: (22 + idx * 4).toFixed(1),
+      humidity: (60 + idx * 2).toFixed(1),
+      light: 3200 + idx * 400,
+    };
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Farm Map</h1>
+      <p style={{ color: C.textMuted, fontSize: 13, margin: "-12px 0 0" }}>Sensor node locations across the farm. Click a node to view details.</p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 18, alignItems: "start" }}>
+        {/* Map Visualization */}
+        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 14, padding: 20, aspectRatio: "4/3", position: "relative", overflow: "hidden" }}>
+          {/* Grid background */}
+          <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0.08 }}>
+            <defs>
+              <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                <path d="M 40 0 L 0 0 0 40" fill="none" stroke={C.green} strokeWidth="0.5"/>
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#grid)" />
+          </svg>
+          {/* Field zones */}
+          {[
+            { x: 10, y: 8, w: 42, h: 38, label: "Zone A" },
+            { x: 52, y: 8, w: 38, h: 38, label: "Zone B" },
+            { x: 8, y: 48, w: 40, h: 38, label: "Zone C" },
+            { x: 48, y: 48, w: 45, h: 38, label: "Zone D+GH" },
+          ].map(z => (
+            <div key={z.label} style={{ position: "absolute", left: `${z.x}%`, top: `${z.y}%`, width: `${z.w}%`, height: `${z.h}%`, background: C.green + "08", border: `1px dashed ${C.green}22`, borderRadius: 8, display: "flex", alignItems: "flex-end", justifyContent: "flex-start", padding: 6 }}>
+              <span style={{ color: C.textSub, fontSize: 10, fontWeight: 700 }}>{z.label}</span>
+            </div>
+          ))}
+          {/* Nodes */}
+          {fieldPositions.map(n => {
+            const node = state.nodes.find(nd => nd.id === n.id);
+            const isOnline = node?.online;
+            const isSel = selected === n.id;
+            return (
+              <div key={n.id} onClick={() => setSelected(isSel ? null : n.id)}
+                style={{ position: "absolute", left: `${n.x}%`, top: `${n.y}%`, transform: "translate(-50%,-50%)", cursor: "pointer", zIndex: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: "50%", border: `2px solid ${isOnline ? C.green : C.red}`, background: isSel ? (isOnline ? C.green + "44" : C.red + "44") : C.surface, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: isOnline ? `0 0 12px ${C.green}66` : "none", transition: "all .2s" }}>
+                  <Icon name="sensors" size={16} color={isOnline ? C.green : C.red} />
+                </div>
+                <div style={{ position: "absolute", top: -18, left: "50%", transform: "translateX(-50%)", color: C.green, fontSize: 9, fontWeight: 700, fontFamily: "monospace", whiteSpace: "nowrap" }}>{n.id}</div>
+              </div>
+            );
+          })}
+          {/* Legend */}
+          <div style={{ position: "absolute", bottom: 12, right: 12, background: C.surface + "dd", border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: "6px 10px", display: "flex", gap: 12, fontSize: 10 }}>
+            <span style={{ color: C.green }}>● Online</span>
+            <span style={{ color: C.red }}>● Offline</span>
+          </div>
+        </div>
+        {/* Node Detail Panel */}
+        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 14, padding: 18, minHeight: 200 }}>
+          {selected ? (() => {
+            const n = fieldPositions.find(f => f.id === selected);
+            const d = nodeDetails(selected);
+            const node = state.nodes.find(nd => nd.id === selected);
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ color: C.green, fontWeight: 700, fontFamily: "monospace" }}>{selected}</span>
+                  <StatusDot online={node?.online} />
+                </div>
+                <div style={{ color: C.textMuted, fontSize: 12 }}>{n.name}</div>
+                <hr style={{ border: "none", borderTop: `1px solid ${C.cardBorder}` }} />
+                {[
+                  { icon: "temp", label: "Temperature", val: `${d.temp}°C`, color: C.amber },
+                  { icon: "moisture", label: "Soil Moisture", val: `${d.moisture}%`, color: C.green },
+                  { icon: "humidity", label: "Humidity", val: `${d.humidity}%`, color: C.blue },
+                  { icon: "light", label: "Light", val: `${d.light} lux`, color: "#a78bfa" },
+                ].map(m => (
+                  <div key={m.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <Icon name={m.icon} size={13} color={m.color} />
+                      <span style={{ color: C.textMuted, fontSize: 12 }}>{m.label}</span>
+                    </div>
+                    <span style={{ color: m.color, fontFamily: "monospace", fontSize: 13, fontWeight: 700 }}>{m.val}</span>
+                  </div>
+                ))}
+                <div style={{ color: C.textSub, fontSize: 11, marginTop: 6 }}>Last update: {new Date().toLocaleTimeString()}</div>
+              </div>
+            );
+          })() : (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 200, gap: 10, color: C.textSub }}>
+              <Icon name="map" size={28} color={C.textSub} />
+              <span style={{ fontSize: 13 }}>Click a node on the map</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};

@@ -1,0 +1,138 @@
+[0m[0m
+[0m[4mC:\Users\Vijay Hiremath\OneDrive\Desktop\lora new\frontend\src\App.jsx[24m[0m
+[0m  [2m224:27[22m  [31merror[39m  Error: Cannot call impure function during render[0m
+[0m[0m
+[0m`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).[0m
+[0m[0m
+[0m  222 |   const nodeData = useMemo(() => state.nodes.map((n, i) => ({[0m
+[0m  223 |     ...n,[0m
+[0m> 224 |     temp: (28 + i * 1.3 + Math.random() * 2).toFixed(1),[0m
+[0m      |                           ^^^^^^^^^^^^^ Cannot call impure function[0m
+[0m  225 |     moisture: (22 + i * 4 - Math.random() * 3).toFixed(1),[0m
+[0m  226 |     humidity: (60 + i * 2 + Math.random() * 5).toFixed(1),[0m
+[0m  227 |     light: Math.round(3200 + i * 400 - Math.random() * 300),                                                                                                         [2mreact-hooks/purity[22m[0m
+[0m  [2m225:29[22m  [31merror[39m  Error: Cannot call impure function during render[0m
+[0m[0m
+[0m`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).[0m
+[0m[0m
+[0m  223 |     ...n,[0m
+[0m  224 |     temp: (28 + i * 1.3 + Math.random() * 2).toFixed(1),[0m
+[0m> 225 |     moisture: (22 + i * 4 - Math.random() * 3).toFixed(1),[0m
+[0m      |                             ^^^^^^^^^^^^^ Cannot call impure function[0m
+[0m  226 |     humidity: (60 + i * 2 + Math.random() * 5).toFixed(1),[0m
+[0m  227 |     light: Math.round(3200 + i * 400 - Math.random() * 300),[0m
+[0m  228 |     lastTx: new Date(Date.now() - i * 4 * 60000).toLocaleTimeString(),                                                                                              [2mreact-hooks/purity[22m[0m
+[0m  [2m226:29[22m  [31merror[39m  Error: Cannot call impure function during render[0m
+[0m[0m
+[0m`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).[0m
+[0m[0m
+[0m  224 |     temp: (28 + i * 1.3 + Math.random() * 2).toFixed(1),[0m
+[0m  225 |     moisture: (22 + i * 4 - Math.random() * 3).toFixed(1),[0m
+[0m> 226 |     humidity: (60 + i * 2 + Math.random() * 5).toFixed(1),[0m
+[0m      |                             ^^^^^^^^^^^^^ Cannot call impure function[0m
+[0m  227 |     light: Math.round(3200 + i * 400 - Math.random() * 300),[0m
+[0m  228 |     lastTx: new Date(Date.now() - i * 4 * 60000).toLocaleTimeString(),[0m
+[0m  229 |   })), [state.nodes]);                                                                                 [2mreact-hooks/purity[22m[0m
+[0m  [2m227:40[22m  [31merror[39m  Error: Cannot call impure function during render[0m
+[0m[0m
+[0m`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).[0m
+[0m[0m
+[0m  225 |     moisture: (22 + i * 4 - Math.random() * 3).toFixed(1),[0m
+[0m  226 |     humidity: (60 + i * 2 + Math.random() * 5).toFixed(1),[0m
+[0m> 227 |     light: Math.round(3200 + i * 400 - Math.random() * 300),[0m
+[0m      |                                        ^^^^^^^^^^^^^ Cannot call impure function[0m
+[0m  228 |     lastTx: new Date(Date.now() - i * 4 * 60000).toLocaleTimeString(),[0m
+[0m  229 |   })), [state.nodes]);[0m
+[0m  230 |                                                                                                                               [2mreact-hooks/purity[22m[0m
+[0m  [2m228:22[22m  [31merror[39m  Error: Cannot call impure function during render[0m
+[0m[0m
+[0m`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).[0m
+[0m[0m
+[0m  226 |     humidity: (60 + i * 2 + Math.random() * 5).toFixed(1),[0m
+[0m  227 |     light: Math.round(3200 + i * 400 - Math.random() * 300),[0m
+[0m> 228 |     lastTx: new Date(Date.now() - i * 4 * 60000).toLocaleTimeString(),[0m
+[0m      |                      ^^^^^^^^^^ Cannot call impure function[0m
+[0m  229 |   })), [state.nodes]);[0m
+[0m  230 |[0m
+[0m  231 |   return (                                                                                                                                                                                                       [2mreact-hooks/purity[22m[0m
+[0m  [2m356:47[22m  [31merror[39m  Error: Cannot call impure function during render[0m
+[0m[0m
+[0m`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).[0m
+[0m[0m
+[0m  354 | const PagePump = ({ state, dispatch }) => {[0m
+[0m  355 |   const { pump, lights } = state;[0m
+[0m> 356 |   const runningSince = useMemo(() => new Date(Date.now() - 8 * 60000).toLocaleTimeString(), []);[0m
+[0m      |                                               ^^^^^^^^^^ Cannot call impure function[0m
+[0m  357 |   return ([0m
+[0m  358 |     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>[0m
+[0m  359 |       <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Pump & Lighting Control</h1>  [2mreact-hooks/purity[22m[0m
+[0m  [2m605:20[22m  [31merror[39m  Error: Cannot call impure function during render[0m
+[0m[0m
+[0m`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).[0m
+[0m[0m
+[0m  603 | const PageDataLogs = () => {[0m
+[0m  604 |   const rows = useMemo(() => Array.from({ length: 20 }, (_, i) => ({[0m
+[0m> 605 |     time: new Date(Date.now() - i * 15 * 60000).toLocaleTimeString(),[0m
+[0m      |                    ^^^^^^^^^^ Cannot call impure function[0m
+[0m  606 |     node: `NODE-0${(i % 5) + 1}`,[0m
+[0m  607 |     temp: (28 + Math.random() * 5).toFixed(1),[0m
+[0m  608 |     humidity: (60 + Math.random() * 15).toFixed(1),                                                                                                                             [2mreact-hooks/purity[22m[0m
+[0m  [2m607:17[22m  [31merror[39m  Error: Cannot call impure function during render[0m
+[0m[0m
+[0m`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).[0m
+[0m[0m
+[0m  605 |     time: new Date(Date.now() - i * 15 * 60000).toLocaleTimeString(),[0m
+[0m  606 |     node: `NODE-0${(i % 5) + 1}`,[0m
+[0m> 607 |     temp: (28 + Math.random() * 5).toFixed(1),[0m
+[0m      |                 ^^^^^^^^^^^^^ Cannot call impure function[0m
+[0m  608 |     humidity: (60 + Math.random() * 15).toFixed(1),[0m
+[0m  609 |     moisture: (22 + Math.random() * 20).toFixed(1),[0m
+[0m  610 |     light: Math.round(2800 + Math.random() * 1200),                                                                                                                    [2mreact-hooks/purity[22m[0m
+[0m  [2m608:21[22m  [31merror[39m  Error: Cannot call impure function during render[0m
+[0m[0m
+[0m`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).[0m
+[0m[0m
+[0m  606 |     node: `NODE-0${(i % 5) + 1}`,[0m
+[0m  607 |     temp: (28 + Math.random() * 5).toFixed(1),[0m
+[0m> 608 |     humidity: (60 + Math.random() * 15).toFixed(1),[0m
+[0m      |                     ^^^^^^^^^^^^^ Cannot call impure function[0m
+[0m  609 |     moisture: (22 + Math.random() * 20).toFixed(1),[0m
+[0m  610 |     light: Math.round(2800 + Math.random() * 1200),[0m
+[0m  611 |   })), []);                                                                                                                                                                          [2mreact-hooks/purity[22m[0m
+[0m  [2m609:21[22m  [31merror[39m  Error: Cannot call impure function during render[0m
+[0m[0m
+[0m`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).[0m
+[0m[0m
+[0m  607 |     temp: (28 + Math.random() * 5).toFixed(1),[0m
+[0m  608 |     humidity: (60 + Math.random() * 15).toFixed(1),[0m
+[0m> 609 |     moisture: (22 + Math.random() * 20).toFixed(1),[0m
+[0m      |                     ^^^^^^^^^^^^^ Cannot call impure function[0m
+[0m  610 |     light: Math.round(2800 + Math.random() * 1200),[0m
+[0m  611 |   })), []);[0m
+[0m  612 |                                                                                                                                                                                                            [2mreact-hooks/purity[22m[0m
+[0m  [2m610:30[22m  [31merror[39m  Error: Cannot call impure function during render[0m
+[0m[0m
+[0m`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).[0m
+[0m[0m
+[0m  608 |     humidity: (60 + Math.random() * 15).toFixed(1),[0m
+[0m  609 |     moisture: (22 + Math.random() * 20).toFixed(1),[0m
+[0m> 610 |     light: Math.round(2800 + Math.random() * 1200),[0m
+[0m      |                              ^^^^^^^^^^^^^ Cannot call impure function[0m
+[0m  611 |   })), []);[0m
+[0m  612 |[0m
+[0m  613 |   return (                                                                                                                                                                                                                                       [2mreact-hooks/purity[22m[0m
+[0m  [2m655:24[22m  [31merror[39m  Error: Cannot call impure function during render[0m
+[0m[0m
+[0m`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).[0m
+[0m[0m
+[0m  653 |   const nodesWithTime = useMemo(() => state.nodes.map((n, i) => ({[0m
+[0m  654 |     ...n,[0m
+[0m> 655 |     lastData: new Date(Date.now() - i * 4 * 60000).toLocaleTimeString(),[0m
+[0m      |                        ^^^^^^^^^^ Cannot call impure function[0m
+[0m  656 |     name: NODES_INIT[i]?.name[0m
+[0m  657 |   })), [state.nodes]);[0m
+[0m  658 |                                                                                                                                                                                                                           [2mreact-hooks/purity[22m[0m
+[0m  [2m664:32[22m  [31merror[39m  'i' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             [2mno-unused-vars[22m[0m
+[0m[0m
+[0m[31m[1m✖ 13 problems (13 errors, 0 warnings)[22m[39m[0m
+[0m[31m[1m[22m[39m[0m

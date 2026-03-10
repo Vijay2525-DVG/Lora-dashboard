@@ -1,0 +1,6 @@
+﻿
+C:\Users\Vijay Hiremath\OneDrive\Desktop\lora new\frontend\src\components\Landing.jsx
+  44:57  error  Duplicate key 'display'  no-dupe-keys
+
+Γ£û 1 problem (1 error, 0 warnings)
+

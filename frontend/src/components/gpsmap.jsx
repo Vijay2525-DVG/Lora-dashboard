@@ -1,6 +1,24 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { C, Icon } from "../App";
+
+const Btn = ({ label, onClick, color = C.green, outline, icon, disabled, type = "button", style = {} }) => (
+  <button type={type} onClick={onClick} disabled={disabled}
+    style={{
+      background: outline ? "transparent" : color + "22",
+      color: disabled ? C.textSub : color,
+      border: `1.5px solid ${disabled ? C.textSub : color}`,
+      borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 700,
+      cursor: disabled ? "not-allowed" : "pointer",
+      letterSpacing: 0.5, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
+      transition: "all .15s", opacity: disabled ? 0.5 : 1,
+      ...style
+    }}>
+    {icon && <Icon name={icon} size={16} color={disabled ? C.textSub : color} />}
+    {label}
+  </button>
+);
 
 export default function GPSMap({
   devices,
@@ -16,27 +34,14 @@ export default function GPSMap({
   const [nameMap, setNameMap] = useState({});
   const [editingDevice, setEditingDevice] = useState(null);
   const [formData, setFormData] = useState({ latitude: "", longitude: "", location_name: "", name: "" });
-  const [pickMode, setPickMode] = useState(false); // when true, next map click sets coordinates for existing device
-  const [mapType, setMapType] = useState("satellite"); // satellite, streets, terrain, dark
-  
-  // Map tile layer options
+  const [pickMode, setPickMode] = useState(false);
+  const [mapType, setMapType] = useState("satellite");
+
   const mapLayers = {
-    satellite: {
-      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      name: 'Satellite'
-    },
-    streets: {
-      url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      name: 'Streets'
-    },
-    terrain: {
-      url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-      name: 'Terrain'
-    },
-    dark: {
-      url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-      name: 'Dark'
-    }
+    satellite: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', name: 'Satellite' },
+    streets: { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', name: 'Streets' },
+    terrain: { url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', name: 'Terrain' },
+    dark: { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', name: 'Dark' }
   };
 
   const validLocations = useMemo(() => {
@@ -45,7 +50,6 @@ export default function GPSMap({
       .map(([id, loc]) => ({ id, ...loc }));
   }, [deviceLocations]);
 
-  // Load device locations from API (include token if available)
   useEffect(() => {
     const headers = {};
     const t = localStorage.getItem("token");
@@ -53,19 +57,11 @@ export default function GPSMap({
 
     fetch("http://localhost:5000/api/gps-map", { headers })
       .then(r => {
-        if (!r.ok) {
-          // try to read any JSON error message
-          return r.json().then(err => {
-            throw new Error(err.error || `HTTP ${r.status}`);
-          });
-        }
+        if (!r.ok) return r.json().then(err => { throw new Error(err.error || `HTTP ${r.status}`); });
         return r.json();
       })
       .then(data => {
-        if (!Array.isArray(data)) {
-          // unexpected response (e.g. {error:...}), bail out
-          throw new Error("gps-map response was not an array");
-        }
+        if (!Array.isArray(data)) throw new Error("gps-map response was not an array");
         const locs = {};
         data.forEach(d => {
           locs[d.id] = {
@@ -75,26 +71,13 @@ export default function GPSMap({
             status: d.status
           };
         });
-        
-        // If we got data from API, use it; otherwise fall back to devices prop
-        if (data.length > 0) {
-          setDeviceLocations(locs);
-        } else {
-          // Fall back to devices prop if API returned empty
-          console.log("GPS API returned empty, using devices prop as fallback");
-        }
+        if (data.length > 0) setDeviceLocations(locs);
       })
-      .catch(err => {
-        console.error("Unable to load gps-map data", err);
-      });
+      .catch(err => console.error("Unable to load gps-map data", err));
   }, [refreshKey]);
 
-  // Fallback: use devices prop coordinates when API returns nothing
   useEffect(() => {
     if (devices.length > 0) {
-      console.log("Checking device coordinates from props:", devices);
-      
-      // Always merge devices prop coordinates as they may be newer
       const newLocs = {};
       devices.forEach(d => {
         if (d.latitude && d.longitude) {
@@ -106,16 +89,11 @@ export default function GPSMap({
           };
         }
       });
-      
-      // Merge with existing locations (devices prop takes precedence for coordinates)
       if (Object.keys(newLocs).length > 0) {
         setDeviceLocations(prev => {
           const merged = { ...prev };
-          // Update with device prop coordinates if available
           Object.keys(newLocs).forEach(id => {
-            if (newLocs[id].latitude && newLocs[id].longitude) {
-              merged[id] = newLocs[id];
-            }
+            if (newLocs[id].latitude && newLocs[id].longitude) merged[id] = newLocs[id];
           });
           return merged;
         });
@@ -123,17 +101,14 @@ export default function GPSMap({
     }
   }, [devices, refreshKey]);
 
-  // Generate demo positions if no GPS data
   useEffect(() => {
     if (devices.length > 0 && Object.keys(deviceLocations).length === 0) {
       const baseLat = 14.4324;
       const baseLng = 75.9566;
       const newLocs = {};
-      
       devices.forEach((device, index) => {
         const row = Math.floor(index / 2);
         const col = index % 2;
-        // preserve any stored configuration/location_name on the device record
         const cfg = device.location_name || device.config || null;
         newLocs[device.id] = {
           latitude: baseLat + (row * 0.0005),
@@ -142,77 +117,47 @@ export default function GPSMap({
           status: device.status || 'offline'
         };
       });
-      
       setDeviceLocations(newLocs);
     }
   }, [devices]);
 
-  // initialize name map from devices prop so users can rename locally
   useEffect(() => {
     const m = {};
     devices.forEach(d => { m[d.id] = d.name || d.id; });
     setNameMap(m);
   }, [devices]);
 
-
-  // initialize Leaflet map once and update markers on change
   const mapRef = useRef(null);
   const boundaryRef = useRef(null);
   const tileLayerRef = useRef(null);
-  
-  // Handle map type change
+
   useEffect(() => {
     if (mapRef.current) {
-      // Remove existing tile layer if it exists
-      if (tileLayerRef.current) {
-        mapRef.current.removeLayer(tileLayerRef.current);
-      }
-      // Add new tile layer
-      tileLayerRef.current = L.tileLayer(mapLayers[mapType].url, {
-        attribution: ''
-      }).addTo(mapRef.current);
+      if (tileLayerRef.current) mapRef.current.removeLayer(tileLayerRef.current);
+      tileLayerRef.current = L.tileLayer(mapLayers[mapType].url, { attribution: '' }).addTo(mapRef.current);
     }
   }, [mapType, mapLayers]);
-  
+
   useEffect(() => {
     if (mapRef.current === null) {
-      // default center, we'll recenter once we have validLocations
       const initCenter = validLocations.length > 0
         ? [validLocations[0].latitude, validLocations[0].longitude]
-        : [14.4324, 75.9566]; // Default to user's location area
+        : [14.4324, 75.9566];
       mapRef.current = L.map('leaflet-map', {
-        center: initCenter,
-        zoom: 16, // Closer zoom for local view
-        scrollWheelZoom: 'center',   // zoom toward map center
-        doubleClickZoom: true,       // re-enable double click
-        zoomControl: true,
-        dragging: true,
-        touchZoom: 'center',         // smoother touch zoom
-        inertia: true,
-        inertiaDeceleration: 3000,
-        zoomSnap: 0,                 // allow fractional zoom
-        zoomDelta: 0.25,
-        zoomAnimation: true,
-        easeLinearity: 0.25,         // smoother easing
-        attributionControl: false   // hide default attribution
+        center: initCenter, zoom: 16, scrollWheelZoom: 'center', doubleClickZoom: true, zoomControl: true, dragging: true, touchZoom: 'center', inertia: true, inertiaDeceleration: 3000, zoomSnap: 0, zoomDelta: 0.25, zoomAnimation: true, easeLinearity: 0.25, attributionControl: false
       });
-      // Initialize map and store tile layer reference
-      const tileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        attribution: '' // no visible attribution
-      });
+      const tileLayer = L.tileLayer(mapLayers[mapType].url, { attribution: '' });
       tileLayerRef.current = tileLayer;
       tileLayer.addTo(mapRef.current);
     }
 
     if (mapRef.current) {
-      // Clear existing markers
       if (mapRef.current._markerGroup) {
         mapRef.current._markerGroup.clearLayers();
       } else {
         mapRef.current._markerGroup = L.layerGroup().addTo(mapRef.current);
       }
 
-      // Add markers for each device
       validLocations.forEach(loc => {
         const m = L.marker([loc.latitude, loc.longitude]);
         m.bindPopup(loc.location_name || loc.id);
@@ -220,96 +165,50 @@ export default function GPSMap({
         mapRef.current._markerGroup.addLayer(m);
       });
 
-      // Fit map to show all markers with boundary - always update when validLocations changes
       if (validLocations.length > 0) {
-        // Calculate bounds from all device locations
         const lats = validLocations.map(loc => loc.latitude);
         const lngs = validLocations.map(loc => loc.longitude);
-        const minLat = Math.min(...lats);
-        const maxLat = Math.max(...lats);
-        const minLng = Math.min(...lngs);
-        const maxLng = Math.max(...lngs);
-        
-        // Add padding around the bounds (about 50 meters)
-        const padding = 0.001; // ~100 meters
+        const padding = 0.001;
         const bounds = [
-          [minLat - padding, minLng - padding],
-          [maxLat + padding, maxLng + padding]
+          [Math.min(...lats) - padding, Math.min(...lngs) - padding],
+          [Math.max(...lats) + padding, Math.max(...lngs) + padding]
         ];
-        
-        // Remove old boundary if exists
-        if (boundaryRef.current) {
-          mapRef.current.removeLayer(boundaryRef.current);
-        }
-        
-        // Add new boundary rectangle around all devices
+        if (boundaryRef.current) mapRef.current.removeLayer(boundaryRef.current);
         boundaryRef.current = L.rectangle(bounds, {
-          color: '#22c55e', // Green border
-          weight: 2,
-          fillColor: '#22c55e',
-          fillOpacity: 0.1,
-          dashArray: '5, 10' // Dashed line
+          color: C.green, weight: 2, fillColor: C.green, fillOpacity: 0.1, dashArray: '5, 10'
         }).addTo(mapRef.current);
-        
-        // Fit map to show all devices
         mapRef.current.fitBounds(bounds, { padding: [50, 50], animate: true });
       } else {
-        // No devices - remove boundary
         if (boundaryRef.current) {
           mapRef.current.removeLayer(boundaryRef.current);
           boundaryRef.current = null;
         }
       }
 
-      // ensure zoom behavior options remain applied
       mapRef.current.options.scrollWheelZoom = true;
       mapRef.current.options.zoomDelta = 0.25;
       mapRef.current.options.easeLinearity = 0.25;
 
-      // attach click listener for coordinate picking
-      // map click handler for picking coordinates;
-      // attach/detach whenever pickMode changes so closure has fresh value
-      if (mapRef.current) {
-        const handler = (e) => {
-          // if editing existing device
-          if (pickMode) {
-            const { lat, lng } = e.latlng;
-            setFormData(prev => ({
-              ...prev,
-              latitude: lat.toString(),
-              longitude: lng.toString()
-            }));
-            setPickMode(false);
-          }
-          // if picking location for a new device
-          else if (addPickMode) {
-            const { lat, lng } = e.latlng;
-            if (onNewLocationPick) {
-              onNewLocationPick(lat, lng);
-            }
-          }
-        };
-        mapRef.current.on('click', handler);
-        return () => {
-          mapRef.current.off('click', handler);
-        };
-      }
+      const handler = (e) => {
+        if (pickMode) {
+          const { lat, lng } = e.latlng;
+          setFormData(prev => ({ ...prev, latitude: lat.toString(), longitude: lng.toString() }));
+          setPickMode(false);
+        } else if (addPickMode) {
+          const { lat, lng } = e.latlng;
+          if (onNewLocationPick) onNewLocationPick(lat, lng);
+        }
+      };
+      mapRef.current.on('click', handler);
+      return () => { mapRef.current.off('click', handler); };
     }
   }, [validLocations, onDeviceClick, pickMode, addPickMode, onNewLocationPick]);
 
-  // pan map when a device is selected via props
   useEffect(() => {
-    if (
-      mapRef.current &&
-      selectedDevice &&
-      deviceLocations[selectedDevice] &&
-      deviceLocations[selectedDevice].latitude &&
-      deviceLocations[selectedDevice].longitude
-    ) {
+    if (mapRef.current && selectedDevice && deviceLocations[selectedDevice] && deviceLocations[selectedDevice].latitude && deviceLocations[selectedDevice].longitude) {
       const lat = parseFloat(deviceLocations[selectedDevice].latitude);
       const lng = parseFloat(deviceLocations[selectedDevice].longitude);
-      // zoom level when focusing a device; jump to a close view
-      let targetZoom = 18; // maximum close‑up
+      let targetZoom = 18;
       const max = mapRef.current.getMaxZoom ? mapRef.current.getMaxZoom() : targetZoom;
       targetZoom = Math.min(targetZoom, max);
       mapRef.current.setView([lat, lng], targetZoom, { animate: true });
@@ -330,14 +229,11 @@ export default function GPSMap({
 
   const handleSave = () => {
     if (!editingDevice) return;
-
-    // allow saving name/configuration without coordinates
     const latStr = (formData.latitude || "").toString().trim();
     const lngStr = (formData.longitude || "").toString().trim();
     const latProvided = latStr !== "";
     const lngProvided = lngStr !== "";
 
-    // require both coordinates if one is provided
     if (latProvided !== lngProvided) {
       alert("Please provide both latitude and longitude to update coordinates.");
       return;
@@ -353,8 +249,7 @@ export default function GPSMap({
         return;
       }
     }
-    
-    // include authorization header so backend can verify ownership
+
     const hdrs = { "Content-Type": "application/json" };
     const t = localStorage.getItem("token");
     if (t) hdrs["Authorization"] = `Bearer ${t}`;
@@ -384,89 +279,92 @@ export default function GPSMap({
   };
 
   return (
-    <div className="gps-map-container">
-      <div className="gps-map-header">
-        <h3>📍 GPS Sensor Map</h3>
-        <div className="map-type-selector">
-          <label>Map Type:</label>
-          <select value={mapType} onChange={(e) => setMapType(e.target.value)}>
-            {Object.entries(mapLayers).map(([key, layer]) => (
-              <option key={key} value={key}>{layer.name}</option>
-            ))}
-          </select>
-        </div>
-        <div className="gps-legend">
-          <span className="legend-item"><span className="dot online"></span> Online</span>
-          <span className="legend-item"><span className="dot offline"></span> Offline</span>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20, height: "100%" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Farm Map</h1>
+
+        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ color: C.textSub, fontSize: 11, textTransform: "uppercase", letterSpacing: 1 }}>Map Style:</span>
+            <select
+              value={mapType}
+              onChange={(e) => setMapType(e.target.value)}
+              style={{ background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 6, padding: "4px 8px", color: C.text, fontSize: 12, outline: "none", cursor: "pointer" }}
+            >
+              {Object.entries(mapLayers).map(([key, layer]) => (
+                <option key={key} value={key}>{layer.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ display: "flex", gap: 12, borderLeft: `1px solid ${C.cardBorder}`, paddingLeft: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.green, boxShadow: `0 0 8px ${C.green}` }} />
+              <span style={{ color: C.textMuted, fontSize: 12 }}>Online</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.red }} />
+              <span style={{ color: C.textMuted, fontSize: 12 }}>Offline</span>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="gps-content">
-        <div className="map-section">
-          <div id="leaflet-map" style={{ height: 400, width: 600, borderRadius: '12px' }} />
+      <div style={{ display: "flex", gap: 20, flex: 1, minHeight: 0 }}>
+        {/* Map Container */}
+        <div style={{ flex: 2, background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden", position: "relative", minHeight: 400 }}>
+          <div id="leaflet-map" style={{ width: "100%", height: "100%" }} />
           {(pickMode || addPickMode) && (
-            <div className="map-pick-overlay">
-              <p>Click on the map to choose location</p>
+            <div style={{ position: "absolute", bottom: 20, left: "50%", transform: "translateX(-50%)", background: C.surface + "ee", backdropFilter: "blur(4px)", padding: "10px 20px", borderRadius: 20, border: `1.5px solid ${C.green}`, color: C.green, fontSize: 14, fontWeight: 700, zIndex: 1000, boxShadow: `0 4px 12px rgba(0,0,0,0.5)`, pointerEvents: "none" }}>
+              📍 Click on the map to choose a location
             </div>
           )}
         </div>
 
-        <div className="sensor-list-section">
-          <h4>Sensor Locations</h4>
-          <div className="sensor-list">
+        {/* Sidebar */}
+        <div style={{ flex: 1, background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 280, maxWidth: 350 }}>
+          <div style={{ padding: "16px 20px", borderBottom: `1px solid ${C.cardBorder}`, background: C.surface }}>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: C.text, letterSpacing: 1, textTransform: "uppercase" }}>Registered Devices</h3>
+          </div>
+          <div style={{ overflowY: "auto", flex: 1, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
             {devices.map(device => {
               const loc = deviceLocations[device.id] || {};
               const isSelected = selectedDevice === device.id;
-              
+
               return (
-                <div
-                  key={device.id}
-                  className={`sensor-item ${isSelected ? 'selected' : ''}`}
+                <div key={device.id}
                   onClick={() => onDeviceClick(device.id)}
-                >
-                  <div className="sensor-info">
-                    <span 
-                      className="sensor-name clickable-device-name" 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (onDeviceNameClick) onDeviceNameClick(device.id);
-                      }}
-                      title="Click to view device details"
-                    >
-                      {nameMap[device.id] || device.name || device.id}
-                    </span>
+                  style={{
+                    padding: "14px 16px", borderRadius: 8, cursor: "pointer", transition: "all 0.15s",
+                    background: isSelected ? C.green + "11" : C.surface,
+                    border: `1.5px solid ${isSelected ? C.green + "55" : C.cardBorder}`,
+                    display: "flex", flexDirection: "column", gap: 8
+                  }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: loc.status === 'online' ? C.green : C.textSub, boxShadow: loc.status === 'online' ? `0 0 6px ${C.green}` : "none" }} />
+                      <span onClick={(e) => { e.stopPropagation(); if (onDeviceNameClick) onDeviceNameClick(device.id); }} style={{ color: isSelected ? C.green : C.text, fontWeight: 700, fontSize: 14 }}>
+                        {nameMap[device.id] || device.name || device.id}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={(e) => { e.stopPropagation(); handleEditClick(device.id); }} style={{ background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 4, display: "flex" }}>
+                        <Icon name="settings" size={14} color={C.textMuted} />
+                      </button>
+                      {onDeleteDevice && (
+                        <button onClick={(e) => { e.stopPropagation(); onDeleteDevice(device.id, device.name || device.id); }} style={{ background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 4, display: "flex" }}>
+                          <Icon name="alerts" size={14} color={C.red + "bb"} />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className="sensor-coords">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: C.textSub, fontFamily: "monospace" }}>
                     {loc.latitude && loc.longitude ? (
-                      <>
-                        <span>{(+loc.latitude).toFixed(4)}</span>
-                        <span>{(+loc.longitude).toFixed(4)}</span>
-                      </>
+                      <><span>Lat: {(+loc.latitude).toFixed(4)}</span><span>Lng: {(+loc.longitude).toFixed(4)}</span></>
                     ) : (
-                      <span className="no-gps">No GPS</span>
+                      <span style={{ color: C.amber + "aa" }}>No GPS Coordinates Set</span>
                     )}
                   </div>
-                  <button 
-                    className="edit-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleEditClick(device.id);
-                    }}
-                  >
-                    ✏️
-                  </button>
-                  {onDeleteDevice && (
-                    <button 
-                      className="delete-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteDevice(device.id, device.name || device.id);
-                      }}
-                      title="Delete device"
-                    >
-                      🗑️
-                    </button>
-                  )}
                 </div>
               );
             })}
@@ -476,72 +374,51 @@ export default function GPSMap({
 
       {/* Edit Modal */}
       {editingDevice && !pickMode && (
-        <div className="modal-overlay" onClick={() => setEditingDevice(null)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <h3>Edit GPS Location</h3>
-            <div className="form-group">
-              <label>Latitude</label>
-              <input
-                type="number"
-                step="0.0001"
-                value={formData.latitude}
-                onChange={e => setFormData({...formData, latitude: e.target.value})}
-                placeholder="13.0823"
-              />
-            </div>
-            <div className="form-group">
-              <label>Longitude</label>
-              <input
-                type="number"
-                step="0.0001"
-                value={formData.longitude}
-                onChange={e => setFormData({...formData, longitude: e.target.value})}
-                placeholder="80.2707"
-              />
+        <div style={{ position: "fixed", inset: 0, background: "#000000bb", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={() => setEditingDevice(null)}>
+          <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 16, width: "100%", maxWidth: 400, padding: 24 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.text }}>Edit Location</h3>
+              <button onClick={() => setEditingDevice(null)} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+                <Icon name="close" size={16} color={C.textMuted} />
+              </button>
             </div>
 
-            <div className="form-group">
-              <label>Device Name</label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={e => setFormData({...formData, name: e.target.value})}
-                placeholder="Friendly name (e.g. North Garden)"
-              />
-            </div>
-            <div className="modal-buttons">
-              <button className="save-btn" onClick={handleSave}>Save</button>
-              <button className="cancel-btn" onClick={() => setEditingDevice(null)}>Cancel</button>
-            </div>
-            <div className="map-pick-controls">
-              <button
-                className="pick-map-btn"
-                onClick={() => {
-                  setPickMode(true);
-                }}
-              >
-                📍 Pick on map
-              </button>
-              <button
-                className="use-location-btn"
-                onClick={() => {
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div>
+                <label style={{ display: "block", color: C.textSub, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Device Name</label>
+                <input type="text" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} placeholder="e.g. North Garden Sensor"
+                  style={{ width: "100%", background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: "10px 12px", color: C.text, fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              </div>
+
+              <div style={{ display: "flex", gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: "block", color: C.textSub, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Latitude</label>
+                  <input type="number" step="0.0001" value={formData.latitude} onChange={e => setFormData({ ...formData, latitude: e.target.value })} placeholder="13.0823"
+                    style={{ width: "100%", background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: "10px 12px", color: C.text, fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: "block", color: C.textSub, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Longitude</label>
+                  <input type="number" step="0.0001" value={formData.longitude} onChange={e => setFormData({ ...formData, longitude: e.target.value })} placeholder="80.2707"
+                    style={{ width: "100%", background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: "10px 12px", color: C.text, fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+                <Btn label="Pick on Map" icon="map" outline color={C.blue} style={{ flex: 1, fontSize: 12, padding: "8px" }} onClick={() => setPickMode(true)} />
+                <Btn label="My Location" icon="settings" outline color={C.amber} style={{ flex: 1, fontSize: 12, padding: "8px" }} onClick={() => {
                   if (navigator.geolocation) {
                     navigator.geolocation.getCurrentPosition(pos => {
-                      setFormData(prev => ({
-                        ...prev,
-                        latitude: pos.coords.latitude.toString(),
-                        longitude: pos.coords.longitude.toString()
-                      }));
+                      setFormData(prev => ({ ...prev, latitude: pos.coords.latitude.toString(), longitude: pos.coords.longitude.toString() }));
                     });
                   }
-                }}
-              >
-                📡 Use my location
-              </button>
+                }} />
+              </div>
+
+              <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+                <Btn label="Cancel" outline color={C.textMuted} onClick={() => setEditingDevice(null)} style={{ flex: 1 }} />
+                <Btn label="Save Changes" color={C.green} onClick={handleSave} style={{ flex: 1 }} />
+              </div>
             </div>
-            {pickMode && (
-              <p className="pick-hint">Click anywhere on the map to choose coordinates</p>
-            )}
           </div>
         </div>
       )}
