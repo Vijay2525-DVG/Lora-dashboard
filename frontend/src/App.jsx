@@ -226,11 +226,11 @@ const PageDashboard = ({ state, dispatch }) => {
 const PageSensors = ({ state }) => {
   const nodeData = useMemo(() => state.nodes.map((n, i) => ({
     ...n,
-    temp: (28 + i * 1.3 + Math.random() * 2).toFixed(1),
-    moisture: (22 + i * 4 - Math.random() * 3).toFixed(1),
-    humidity: (60 + i * 2 + Math.random() * 5).toFixed(1),
-    light: Math.round(3200 + i * 400 - Math.random() * 300),
-    lastTx: new Date(Date.now() - i * 4 * 60000).toLocaleTimeString(),
+    temp: n.temperature !== undefined ? n.temperature : (28 + i * 1.3 + Math.random() * 2).toFixed(1),
+    moisture: n.soil !== undefined ? n.soil : (22 + i * 4 - Math.random() * 3).toFixed(1),
+    humidity: n.humidity !== undefined ? n.humidity : (60 + i * 2 + Math.random() * 5).toFixed(1),
+    light: n.light !== undefined ? n.light : Math.round(3200 + i * 400 - Math.random() * 300),
+    lastTx: n.last_update ? new Date(n.last_update).toLocaleTimeString() : new Date(Date.now() - i * 4 * 60000).toLocaleTimeString(),
   })), [state.nodes]);
 
   return (
@@ -249,7 +249,7 @@ const PageSensors = ({ state }) => {
           <tbody>
             {nodeData.map((n, i) => (
               <tr key={n.id} style={{ borderBottom: `1px solid ${C.cardBorder}`, background: i % 2 === 0 ? "transparent" : C.card + "88" }}>
-                <td style={{ padding: "12px 14px", color: C.green, fontWeight: 700, fontFamily: "monospace" }}>{n.id}</td>
+                <td style={{ padding: "12px 14px", color: C.green, fontWeight: 700, fontFamily: "monospace" }}>{n.name || n.id}</td>
                 <td style={{ padding: "12px 14px", color: C.text }}>
                   <span style={{ color: parseFloat(n.moisture) < 25 ? C.red : C.green }}>{n.moisture}%</span>
                 </td>
@@ -462,8 +462,11 @@ const Chart4 = ({ data, color, label, unit }) => (
   </div>
 );
 
-const PageAnalytics = ({ state }) => {
+const PageAnalytics = ({ apiFetch, state, demoMode }) => {
   const [filter, setFilter] = useState("24h");
+  const [historyRows, setHistoryRows] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  
   const filters = ["1h", "24h", "7d", "30d"];
   const cnt = { "1h": 12, "24h": 48, "7d": 168, "30d": 720 };
   const histLen = Math.min(cnt[filter], state.history.temp.length);
@@ -472,6 +475,75 @@ const PageAnalytics = ({ state }) => {
   const moistureData = state.history.moisture.slice(-histLen);
   const humidityData = state.history.humidity.slice(-histLen);
   const lightData = state.history.light.slice(-histLen);
+
+  useEffect(() => {
+    let active = true;
+    let interval;
+    
+    const fetchData = async () => {
+      try {
+        const res = await apiFetch("http://localhost:5000/api/json-data");
+        if (!res.ok) throw new Error("Could not fetch data");
+        const data = await res.json();
+        
+        if (active) {
+          const allReadings = [];
+          
+          const nodeMap = {};
+          state.nodes.forEach(n => nodeMap[n.id] = n);
+
+          if (data.devices) {
+            Object.keys(data.devices).forEach(devId => {
+               const devName = nodeMap[devId]?.name || devId;
+               const readings = data.devices[devId].readings || [];
+               readings.forEach(r => {
+                 allReadings.push({
+                   date: new Date(r.created_at).toLocaleDateString(),
+                   time: new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                   timestamp: new Date(r.created_at).getTime(),
+                   node: devName,
+                   temp: r.temperature !== null ? Number(r.temperature).toFixed(1) : "-",
+                   humidity: r.humidity !== null ? Number(r.humidity).toFixed(1) : "-",
+                   moisture: r.soil !== null ? Number(r.soil).toFixed(1) : "-",
+                   light: r.light ?? "-",
+                 });
+               });
+            });
+          }
+
+          if (demoMode && allReadings.length === 0) {
+            for (let i = 0; i < 15; i++) {
+              allReadings.push({
+                date: new Date().toLocaleDateString(),
+                time: new Date(Date.now() - i * 15 * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                timestamp: Date.now() - i * 15 * 60000,
+                node: `Demo Node ${(i % 5) + 1}`,
+                temp: (28 + Math.random() * 5).toFixed(1),
+                humidity: (60 + Math.random() * 15).toFixed(1),
+                moisture: (22 + Math.random() * 20).toFixed(1),
+                light: Math.round(2800 + Math.random() * 1200),
+              });
+            }
+          }
+
+          allReadings.sort((a, b) => b.timestamp - a.timestamp);
+          setHistoryRows(allReadings.slice(0, 15)); // Only show last 15 on Analytics page
+          setLoadingHistory(false);
+        }
+      } catch (err) {
+        console.error("Failed to load records", err);
+        if (active) setLoadingHistory(false);
+      }
+    };
+    
+    fetchData();
+    interval = setInterval(fetchData, 10000);
+
+    return () => { 
+      active = false;
+      clearInterval(interval);
+    };
+  }, [apiFetch, state.nodes, demoMode]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -492,22 +564,120 @@ const PageAnalytics = ({ state }) => {
         <Chart4 data={humidityData} color={C.blue} label="Humidity" unit="%" />
         <Chart4 data={lightData} color="#a78bfa" label="Light Intensity" unit="lux" />
       </div>
+
+      {/* Recent Read History Table */}
+      <div style={{ marginTop: 10 }}>
+        <h3 style={{ color: C.text, fontSize: 16, fontWeight: 700, margin: "0 0 16px", letterSpacing: 0.5 }}>Recent Read History</h3>
+        <div style={{ overflowX: "auto", background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12 }}>
+          {loadingHistory ? (
+            <div style={{ padding: "30px", textAlign: "center", color: C.textMuted }}>Loading read history...</div>
+          ) : historyRows.length === 0 ? (
+            <div style={{ padding: "30px", textAlign: "center", color: C.textSub }}>No historical data available</div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.cardBorder}`, background: C.surface }}>
+                  {["Date", "Time", "Node", "Temp (°C)", "Humidity (%)", "Moisture (%)", "Light (lux)"].map(h => (
+                    <th key={h} style={{ color: C.textSub, fontSize: 11, letterSpacing: 1, textAlign: "left", padding: "12px 16px", fontWeight: 700, textTransform: "uppercase" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {historyRows.map((r, i) => (
+                  <tr key={i} style={{ borderBottom: i === historyRows.length - 1 ? 'none' : `1px solid ${C.cardBorder}88`, background: i % 2 === 0 ? "transparent" : C.surface + "55" }}>
+                    <td style={{ padding: "10px 16px", color: C.text, fontSize: 12 }}>{r.date}</td>
+                    <td style={{ padding: "10px 16px", color: C.textMuted, fontFamily: "monospace", fontSize: 11 }}>{r.time}</td>
+                    <td style={{ padding: "10px 16px", color: C.green, fontFamily: "monospace", fontWeight: 700 }}>{r.node}</td>
+                    <td style={{ padding: "10px 16px", color: C.amber }}>{r.temp}</td>
+                    <td style={{ padding: "10px 16px", color: C.blue }}>{r.humidity}</td>
+                    <td style={{ padding: "10px 16px", color: C.green }}>{r.moisture}</td>
+                    <td style={{ padding: "10px 16px", color: "#a78bfa" }}>{r.light}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
 
-const PageDataLogs = () => {
-  const rows = useMemo(() => Array.from({ length: 20 }, (_, i) => ({
-    time: new Date(Date.now() - i * 15 * 60000).toLocaleTimeString(),
-    node: `NODE-0${(i % 5) + 1}`,
-    temp: (28 + Math.random() * 5).toFixed(1),
-    humidity: (60 + Math.random() * 15).toFixed(1),
-    moisture: (22 + Math.random() * 20).toFixed(1),
-    light: Math.round(2800 + Math.random() * 1200),
-  })), []);
+const PageDataLogs = ({ apiFetch, state, demoMode }) => {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    let interval;
+    
+    const fetchData = async () => {
+      try {
+        const res = await apiFetch("http://localhost:5000/api/json-data");
+        if (!res.ok) throw new Error("Could not fetch data");
+        const data = await res.json();
+        
+        if (active) {
+          const allReadings = [];
+          
+          const nodeMap = {};
+          state.nodes.forEach(n => nodeMap[n.id] = n);
+
+          if (data.devices) {
+            Object.keys(data.devices).forEach(devId => {
+               const devName = nodeMap[devId]?.name || devId;
+               const readings = data.devices[devId].readings || [];
+               readings.forEach(r => {
+                 allReadings.push({
+                   time: new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                   timestamp: new Date(r.created_at).getTime(),
+                   node: devName,
+                   temp: r.temperature !== null ? Number(r.temperature).toFixed(1) : "-",
+                   humidity: r.humidity !== null ? Number(r.humidity).toFixed(1) : "-",
+                   moisture: r.soil !== null ? Number(r.soil).toFixed(1) : "-",
+                   light: r.light ?? "-",
+                 });
+               });
+            });
+          }
+
+          if (demoMode && allReadings.length === 0) {
+            for (let i = 0; i < 20; i++) {
+              allReadings.push({
+                time: new Date(Date.now() - i * 15 * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                timestamp: Date.now() - i * 15 * 60000,
+                node: `Demo Node ${(i % 5) + 1}`,
+                temp: (28 + Math.random() * 5).toFixed(1),
+                humidity: (60 + Math.random() * 15).toFixed(1),
+                moisture: (22 + Math.random() * 20).toFixed(1),
+                light: Math.round(2800 + Math.random() * 1200),
+              });
+            }
+          }
+
+          // Sort descending by timestamp
+          allReadings.sort((a, b) => b.timestamp - a.timestamp);
+          setRows(allReadings);
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to load records", err);
+        if (active) setLoading(false);
+      }
+    };
+    
+    fetchData();
+    interval = setInterval(fetchData, 10000); // Poll every 10s
+
+    return () => { 
+      active = false;
+      clearInterval(interval);
+    };
+  }, [apiFetch, state.nodes, demoMode]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div>
           <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Data Logs</h1>
@@ -518,28 +688,36 @@ const PageDataLogs = () => {
           <Btn label="Export PDF" icon="download" color={C.blue} />
         </div>
       </div>
+      
+      {/* Table */}
       <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead>
-            <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
-              {["Timestamp", "Node ID", "Temp (°C)", "Humidity (%)", "Moisture (%)", "Light (lux)"].map(h => (
-                <th key={h} style={{ color: C.textSub, fontSize: 11, letterSpacing: 1, textAlign: "left", padding: "10px 14px", fontWeight: 700, textTransform: "uppercase" }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} style={{ borderBottom: `1px solid ${C.cardBorder}88`, background: i % 2 === 0 ? "transparent" : C.card + "55" }}>
-                <td style={{ padding: "10px 14px", color: C.textMuted, fontFamily: "monospace", fontSize: 11 }}>{r.time}</td>
-                <td style={{ padding: "10px 14px", color: C.green, fontFamily: "monospace", fontWeight: 700 }}>{r.node}</td>
-                <td style={{ padding: "10px 14px", color: C.amber }}>{r.temp}</td>
-                <td style={{ padding: "10px 14px", color: C.blue }}>{r.humidity}</td>
-                <td style={{ padding: "10px 14px", color: C.green }}>{r.moisture}</td>
-                <td style={{ padding: "10px 14px", color: "#a78bfa" }}>{r.light}</td>
+        {loading ? (
+          <div style={{ padding: "40px", textAlign: "center", color: C.textMuted }}>Loading sensor history...</div>
+        ) : rows.length === 0 ? (
+          <div style={{ padding: "40px", textAlign: "center", color: C.textSub }}>No historical data available</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+                {["Timestamp", "Node ID", "Temp (°C)", "Humidity (%)", "Moisture (%)", "Light (lux)"].map(h => (
+                  <th key={h} style={{ color: C.textSub, fontSize: 11, letterSpacing: 1, textAlign: "left", padding: "10px 14px", fontWeight: 700, textTransform: "uppercase" }}>{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${C.cardBorder}88`, background: i % 2 === 0 ? "transparent" : C.card + "55" }}>
+                  <td style={{ padding: "10px 14px", color: C.textMuted, fontFamily: "monospace", fontSize: 11 }}>{r.time}</td>
+                  <td style={{ padding: "10px 14px", color: C.green, fontFamily: "monospace", fontWeight: 700 }}>{r.node}</td>
+                  <td style={{ padding: "10px 14px", color: C.amber }}>{r.temp}</td>
+                  <td style={{ padding: "10px 14px", color: C.blue }}>{r.humidity}</td>
+                  <td style={{ padding: "10px 14px", color: C.green }}>{r.moisture}</td>
+                  <td style={{ padding: "10px 14px", color: "#a78bfa" }}>{r.light}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
@@ -790,7 +968,10 @@ function DashboardLayout({ token, setToken, userRole, apiFetch }) {
 
           dispatchFn({ type: "MERGE_LIVE_DATA", payload: { devices, alerts, allData } });
         } else if (devicesRes.status === 401 || devicesRes.status === 403) {
-          // Handled by apiFetch wrapper generally, but explicit catches just in case
+          setToken("");
+          localStorage.removeItem("token");
+          localStorage.removeItem("userRole");
+          window.location.href = "/";
         }
       } catch (err) {
         console.error("Failed to connect to backend", err);
@@ -812,8 +993,8 @@ function DashboardLayout({ token, setToken, userRole, apiFetch }) {
     pump: <PagePump state={state} dispatch={dispatchFn} />,
     map: <GPSMap devices={state.nodes} onDeviceClick={(id) => { }} selectedDevice={null} onDeviceNameClick={(id) => { }} />,
     alerts: <PageAlerts state={state} />,
-    analytics: <PageAnalytics state={state} />,
-    logs: <PageDataLogs state={state} />,
+    analytics: <PageAnalytics apiFetch={apiFetch} state={state} demoMode={demoMode} />,
+    logs: <PageDataLogs apiFetch={apiFetch} state={state} demoMode={demoMode} />,
     device: <PageDeviceStatus state={state} />,
     syslog: <PageSystemLogs />,
     settings: <PageSettings state={state} dispatch={dispatchFn} />,
