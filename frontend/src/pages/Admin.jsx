@@ -1,6 +1,96 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { C, Icon } from "../App";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+
+
+// ── Inline Leaflet map picker used in the Add Device modal ──────────────────
+function LocationPickerMap({ lat, lng, onChange }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const markerRef = useRef(null);
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
+
+    const initLat = lat || 14.4324;
+    const initLng = lng || 75.9566;
+
+    const map = L.map(containerRef.current, {
+      center: [initLat, initLng],
+      zoom: 13,
+      zoomControl: true,
+      attributionControl: false
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    // Place a draggable marker if initial coords provided
+    if (lat && lng) {
+      const m = L.marker([lat, lng], { draggable: true }).addTo(map);
+      m.on('dragend', () => {
+        const p = m.getLatLng();
+        onChange(p.lat, p.lng);
+      });
+      markerRef.current = m;
+    }
+
+    map.on('click', (e) => {
+      const { lat: clickLat, lng: clickLng } = e.latlng;
+      onChange(clickLat, clickLng);
+      if (markerRef.current) {
+        markerRef.current.setLatLng([clickLat, clickLng]);
+      } else {
+        const m = L.marker([clickLat, clickLng], { draggable: true }).addTo(map);
+        m.on('dragend', () => {
+          const p = m.getLatLng();
+          onChange(p.lat, p.lng);
+        });
+        markerRef.current = m;
+      }
+    });
+
+    mapRef.current = map;
+    // Force resize after render
+    setTimeout(() => map.invalidateSize(), 50);
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      markerRef.current = null;
+    };
+  }, []); // only mount once
+
+  // When parent passes lat/lng updates (e.g. from geolocation), move the map & marker
+  useEffect(() => {
+    if (!mapRef.current || lat === undefined || lng === undefined) return;
+    const numLat = parseFloat(lat);
+    const numLng = parseFloat(lng);
+    if (isNaN(numLat) || isNaN(numLng)) return;
+    mapRef.current.setView([numLat, numLng], 15);
+    if (markerRef.current) {
+      markerRef.current.setLatLng([numLat, numLng]);
+    } else {
+      const m = L.marker([numLat, numLng], { draggable: true }).addTo(mapRef.current);
+      m.on('dragend', () => {
+        const p = m.getLatLng();
+        onChange(p.lat, p.lng);
+      });
+      markerRef.current = m;
+    }
+  }, [lat, lng]);
+
+  return (
+    <div style={{ position: "relative" }}>
+      <div ref={containerRef} style={{ width: "100%", height: 280, borderRadius: 10, overflow: "hidden", border: `1.5px solid ${C.green}44` }} />
+      <div style={{ position: "absolute", bottom: 10, left: "50%", transform: "translateX(-50%)", background: C.surface + "ee", backdropFilter: "blur(4px)", padding: "6px 14px", borderRadius: 20, border: `1.5px solid ${C.green}`, color: C.green, fontSize: 12, fontWeight: 700, pointerEvents: "none", whiteSpace: "nowrap", zIndex: 1000 }}>
+        📍 Click or drag pin to set location
+      </div>
+    </div>
+  );
+}
+// ────────────────────────────────────────────────────────────────────────────
 
 const Btn = ({ label, onClick, color = C.green, outline, icon, disabled, type = "button", style = {} }) => (
   <button type={type} onClick={onClick} disabled={disabled}
@@ -45,6 +135,11 @@ export default function Admin({ token, apiFetch }) {
   const [editingDevice, setEditingDevice] = useState(null);
   const [editDeviceData, setEditDeviceData] = useState({ name: "", latitude: "", longitude: "", location_name: "" });
   const [savingDevice, setSavingDevice] = useState(false);
+
+  const [addingDevice, setAddingDevice] = useState(false);
+  const [addDeviceForm, setAddDeviceForm] = useState({ device_id: "", name: "", user_id: "", latitude: "", longitude: "", location_name: "" });
+  const [savingNewDevice, setSavingNewDevice] = useState(false);
+  const [showMapPicker, setShowMapPicker] = useState(false);
 
   const [editingConfig, setEditingConfig] = useState(null);
   const [configForm, setConfigForm] = useState({ max_lands: 5, max_sensors_per_land: 10 });
@@ -204,6 +299,42 @@ export default function Admin({ token, apiFetch }) {
     } catch (err) {
       alert("Error deleting device");
     }
+  };
+
+  const handleAddDevice = async () => {
+    const { device_id, name, user_id } = addDeviceForm;
+    if (!device_id.trim() || !name.trim() || !user_id) {
+      alert("Device ID, Name, and Owner are required.");
+      return;
+    }
+    setSavingNewDevice(true);
+    try {
+      const response = await apiFetch("http://localhost:5000/api/admin/devices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          device_id: addDeviceForm.device_id.trim(),
+          name: addDeviceForm.name.trim(),
+          user_id: parseInt(addDeviceForm.user_id),
+          latitude: addDeviceForm.latitude ? parseFloat(addDeviceForm.latitude) : null,
+          longitude: addDeviceForm.longitude ? parseFloat(addDeviceForm.longitude) : null,
+          location_name: addDeviceForm.location_name || null
+        })
+      });
+      if (response.ok) {
+        // Refresh device list
+        const devRes = await apiFetch("http://localhost:5000/api/admin/devices");
+        if (devRes.ok) setDevices(await devRes.json());
+        setAddingDevice(false);
+        setAddDeviceForm({ device_id: "", name: "", user_id: "", latitude: "", longitude: "", location_name: "" });
+      } else {
+        const data = await response.json();
+        alert(data.error || "Failed to add device");
+      }
+    } catch (err) {
+      alert("Error adding device");
+    }
+    setSavingNewDevice(false);
   };
 
   if (loading) {
@@ -377,6 +508,10 @@ export default function Admin({ token, apiFetch }) {
 
           {/* DEVICES */}
           {activeTab === "devices" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <Btn label="+ Add Device" color={C.green} icon="sensors" onClick={() => setAddingDevice(true)} />
+              </div>
             <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 16, overflow: "hidden" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
@@ -418,6 +553,7 @@ export default function Admin({ token, apiFetch }) {
                   ))}
                 </tbody>
               </table>
+            </div>
             </div>
           )}
 
@@ -461,6 +597,97 @@ export default function Admin({ token, apiFetch }) {
           )}
         </div>
       </div>
+
+      {/* Add Device Modal */}
+      {addingDevice && (
+        <div style={{ position: "fixed", inset: 0, background: "#000000dd", backdropFilter: "blur(6px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={() => setAddingDevice(false)}>
+          <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 16, width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto", padding: 32 }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: "0 0 24px 0", fontSize: 20, fontWeight: 800, color: C.text }}>Add New Device</h3>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div>
+                <label style={{ display: "block", color: C.textSub, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Device ID / MAC Address *</label>
+                <input type="text" value={addDeviceForm.device_id} onChange={e => setAddDeviceForm({ ...addDeviceForm, device_id: e.target.value })} placeholder="e.g. NODE_01 or AA:BB:CC:DD:EE:FF"
+                  style={{ width: "100%", background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: "10px 14px", color: C.text, fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              </div>
+
+              <div>
+                <label style={{ display: "block", color: C.textSub, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Device Friendly Name *</label>
+                <input type="text" value={addDeviceForm.name} onChange={e => setAddDeviceForm({ ...addDeviceForm, name: e.target.value })} placeholder="e.g. Pump Station 1"
+                  style={{ width: "100%", background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: "10px 14px", color: C.text, fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              </div>
+
+              <div>
+                <label style={{ display: "block", color: C.textSub, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Assign to User *</label>
+                <select value={addDeviceForm.user_id} onChange={e => setAddDeviceForm({ ...addDeviceForm, user_id: e.target.value })}
+                  style={{ width: "100%", background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: "10px 14px", color: addDeviceForm.user_id ? C.text : C.textSub, fontSize: 14, outline: "none", boxSizing: "border-box", cursor: "pointer" }}>
+                  <option value="">-- Select a user --</option>
+                  {users.map(u => <option key={u.id} value={u.id}>{u.username} (ID: {u.id})</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: "block", color: C.textSub, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Farm / Location Zone</label>
+                <input type="text" value={addDeviceForm.location_name} onChange={e => setAddDeviceForm({ ...addDeviceForm, location_name: e.target.value })} placeholder="e.g. Greenhouse Alpha"
+                  style={{ width: "100%", background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: "10px 14px", color: C.text, fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              </div>
+
+              <div style={{ display: "flex", gap: 16 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: "block", color: C.textSub, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Latitude</label>
+                  <input type="number" step="any" value={addDeviceForm.latitude} onChange={e => setAddDeviceForm({ ...addDeviceForm, latitude: e.target.value })} placeholder="13.0823"
+                    style={{ width: "100%", background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: "10px 14px", color: C.text, fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: "block", color: C.textSub, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Longitude</label>
+                  <input type="number" step="any" value={addDeviceForm.longitude} onChange={e => setAddDeviceForm({ ...addDeviceForm, longitude: e.target.value })} placeholder="80.2707"
+                    style={{ width: "100%", background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: "10px 14px", color: C.text, fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+                </div>
+              </div>
+
+              {/* Map & location helper buttons */}
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => setShowMapPicker(v => !v)}
+                  style={{ flex: 1, background: showMapPicker ? C.green + "22" : "transparent", color: C.green, border: `1.5px solid ${C.green}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  🗺️ {showMapPicker ? "Hide Map" : "Pick on Map"}
+                </button>
+                <button onClick={() => {
+                  if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(pos => {
+                      setAddDeviceForm(f => ({ ...f, latitude: pos.coords.latitude.toFixed(6), longitude: pos.coords.longitude.toFixed(6) }));
+                    }, () => alert("Could not get your location."));
+                  }
+                }}
+                  style={{ flex: 1, background: "transparent", color: C.amber, border: `1.5px solid ${C.amber}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  📡 Use My Location
+                </button>
+              </div>
+
+              {/* Inline Leaflet map */}
+              {showMapPicker && (
+                <LocationPickerMap
+                  lat={addDeviceForm.latitude ? parseFloat(addDeviceForm.latitude) : undefined}
+                  lng={addDeviceForm.longitude ? parseFloat(addDeviceForm.longitude) : undefined}
+                  onChange={(lat, lng) => setAddDeviceForm(f => ({ ...f, latitude: lat.toFixed(6), longitude: lng.toFixed(6) }))}
+                />
+              )}
+
+              {addDeviceForm.latitude && addDeviceForm.longitude && (
+                <div style={{ background: C.green + "11", border: `1px solid ${C.green}33`, borderRadius: 8, padding: "8px 14px", fontSize: 12, color: C.green, fontFamily: "monospace", textAlign: "center" }}>
+                  📍 {parseFloat(addDeviceForm.latitude).toFixed(5)}, {parseFloat(addDeviceForm.longitude).toFixed(5)}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+                <Btn label="Cancel" outline color={C.textMuted} onClick={() => { setAddingDevice(false); setShowMapPicker(false); }} style={{ flex: 1 }} />
+                <Btn label={savingNewDevice ? "Adding..." : "Add Device"} color={C.green} onClick={handleAddDevice} disabled={savingNewDevice} style={{ flex: 1 }} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+
 
       {/* Edit Device Modal */}
       {editingDevice && (

@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/purity */
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from "recharts";
+import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, ReferenceLine, Legend } from "recharts";
 import Admin from "./pages/Admin";
 import Landing from "./components/Landing";
 import GPSMap from "./components/gpsmap";
@@ -23,6 +23,152 @@ export const C = {
   textSub: "#4a6b4a",
 };
 
+const LANGUAGE_OPTIONS = [
+  { code: "en", label: "English" },
+  { code: "hi", label: "हिन्दी" },
+  { code: "kn", label: "ಕನ್ನಡ" },
+];
+
+const TEXT = {
+  nav: {
+    dashboard: { en: "Dashboard", hi: "डैशबोर्ड", kn: "ಡ್ಯಾಶ್‌ಬೋರ್ಡ್" },
+    sensors: { en: "Sensors", hi: "सेंसर", kn: "ಸೆನ್ಸಾರ್‌ಗಳು" },
+    irrigation: { en: "Irrigation Control", hi: "सिंचाई नियंत्रण", kn: "ನೀರಾವರಿ ನಿಯಂತ್ರಣ" },
+    pump: { en: "Pump & Lighting", hi: "पंप और लाइट", kn: "ಪಂಪ್ ಮತ್ತು ಬೆಳಕು" },
+    map: { en: "Farm Map", hi: "खेत का मानचित्र", kn: "ಫಾರ್ಮ್ ನಕ್ಷೆ" },
+    alerts: { en: "Alerts", hi: "अलर्ट", kn: "ಎಚ್ಚರಿಕೆಗಳು" },
+    analytics: { en: "Analytics", hi: "विश्लेषण", kn: "ವಿಶ್ಲೇಷಣೆ" },
+    logs: { en: "Data Logs", hi: "डेटा लॉग", kn: "ಡೇಟಾ ದಾಖಲೆಗಳು" },
+    device: { en: "Device Status", hi: "डिवाइस स्थिति", kn: "ಉಪಕರಣ ಸ್ಥಿತಿ" },
+    syslog: { en: "System Logs", hi: "सिस्टम लॉग", kn: "ಸಿಸ್ಟಮ್ ದಾಖಲೆಗಳು" },
+    settings: { en: "Settings", hi: "सेटिंग्स", kn: "ಸಂಯೋಜನೆಗಳು" },
+    admin: { en: "Admin Panel", hi: "एडमिन पैनल", kn: "ನಿರ್ವಹಣಾ ಪ್ಯಾನೆಲ್" },
+    logout: { en: "Logout", hi: "लॉगआउट", kn: "ಲಾಗ್‌ಔಟ್" },
+  },
+  pages: {
+    farmOverviewTitle: {
+      en: "Farm Overview",
+      hi: "फार्म का सारांश",
+      kn: "ಫಾರ್ಮ್ ಅವಲೋಕನ",
+    },
+    farmOverviewSubtitle: {
+      en: "Real-time agricultural monitoring",
+      hi: "रीयल-टाइम कृषि निगरानी",
+      kn: "ರಿಯಲ್-ಟೈಮ್ ಕೃಷಿ ಮಾನಿಟರಿಂಗ್",
+    },
+    analyticsTitle: {
+      en: "Analytics",
+      hi: "विश्लेषण",
+      kn: "ವಿಶ್ಲೇಷಣೆ",
+    },
+    analyticsAllDevices: {
+      en: "Showing all devices",
+      hi: "सभी डिवाइस दिखाए जा रहे हैं",
+      kn: "ಎಲ್ಲ ಉಪಕರಣಗಳನ್ನು ತೋರಿಸಲಾಗುತ್ತಿದೆ",
+    },
+    irrigationTitle: {
+      en: "Automatic Irrigation Control",
+      hi: "स्वचालित सिंचाई नियंत्रण",
+      kn: "ಸ್ವಯಂ ನೀರಾವರಿ ನಿಯಂತ್ರಣ",
+    },
+    pumpTitle: {
+      en: "Pump & Lighting Control",
+      hi: "पंप और लाइटिंग नियंत्रण",
+      kn: "ಪಂಪ್ ಮತ್ತು ಬೆಳಕು ನಿಯಂತ್ರಣ",
+    },
+    sensorsTitle: {
+      en: "Sensor Nodes",
+      hi: "सेंसर नोड्स",
+      kn: "ಸೆನ್ಸಾರ್ ನೋಡ್‌ಗಳು",
+    },
+    sensorsSubtitle: {
+      en: "Live readings from LoRa sensor nodes across the farm",
+      hi: "पूरे खेत में LoRa सेंसर नोड्स से लाइव रीडिंग",
+      kn: "ಫಾರ್ಮ್‌ನಾದ್ಯಂತ ಲೋರಾ ಸೆನ್ಸಾರ್ ನೋಡ್‌ಗಳಿಂದ ಲೈವ್ ರೀಡಿಂಗ್‌ಗಳು",
+    },
+    mapTitle: {
+      en: "Farm Map",
+      hi: "खेत का मानचित्र",
+      kn: "ಫಾರ್ಮ್ ನಕ್ಷೆ",
+    },
+    alertsTitle: {
+      en: "Alerts & Notifications",
+      hi: "अलर्ट और सूचनाएँ",
+      kn: "ಎಚ್ಚರಿಕೆಗಳು ಮತ್ತು ತಿಳಿವುಗಳು",
+    },
+    alertsSubtitle: {
+      en: "System alerts triggered by sensor threshold violations",
+      hi: "सेंसर की सीमा पार होने पर उत्पन्न होने वाले सिस्टम अलर्ट",
+      kn: "ಸೆನ್ಸಾರ್ ಗಡಿಯನ್ನು ಮೀರುವಾಗ ಉಂಟಾಗುವ ಸಿಸ್ಟಮ್ ಎಚ್ಚರಿಕೆಗಳು",
+    },
+    alertsCriticalBadge: {
+      en: "CRITICAL",
+      hi: "गंभीर",
+      kn: "ಗಂಭೀರ",
+    },
+    severityHigh: {
+      en: "High",
+      hi: "उच्च",
+      kn: "ಹೆಚ್ಚು",
+    },
+    severityMedium: {
+      en: "Medium",
+      hi: "मध्यम",
+      kn: "ಮಧ್ಯಮ",
+    },
+    severityLow: {
+      en: "Low",
+      hi: "कम",
+      kn: "ಕಡಿಮೆ",
+    },
+    labelDevice: {
+      en: "Device",
+      hi: "डिवाइस",
+      kn: "ಉಪಕರಣ",
+    },
+    labelValue: {
+      en: "Value",
+      hi: "मान",
+      kn: "ಮೌಲ್ಯ",
+    },
+    labelThreshold: {
+      en: "Threshold",
+      hi: "सीमा",
+      kn: "ಮಿತಿ",
+    },
+    alertTypeLowSoil: {
+      en: "Low Soil Moisture",
+      hi: "कम मिट्टी नमी",
+      kn: "ಕಡಿಮೆ ಮಣ್ಣಿನ ತೇವಾಂಶ",
+    },
+    alertTypeHighTemp: {
+      en: "High Temperature",
+      hi: "अधिक तापमान",
+      kn: "ಹೆಚ್ಚಿನ ತಾಪಮಾನ",
+    },
+    alertTypeNodeOffline: {
+      en: "Node Offline",
+      hi: "नोड ऑफलाइन",
+      kn: "ನೋಡ್ ಆಫ್‌ಲೈನ್",
+    },
+    alertTypeLowBattery: {
+      en: "Low Battery",
+      hi: "कम बैटरी",
+      kn: "ಕಡಿಮೆ ಬ್ಯಾಟರಿ",
+    },
+    timeYesterday: {
+      en: "Yesterday",
+      hi: "कल",
+      kn: "ನಿನ್ನೆ",
+    },
+  },
+};
+
+const t = (group, key, lang) =>
+  (TEXT[group] && TEXT[group][key] && TEXT[group][key][lang]) ||
+  (TEXT[group] && TEXT[group][key] && TEXT[group][key].en) ||
+  key;
+
 // ─── Data Simulation ────────────────────────────────────────────────────────
 const generateHistory = (base, variance, count = 48) =>
   Array.from({ length: count }, (_, i) => ({
@@ -39,11 +185,11 @@ const NODES_INIT = [
 ];
 
 const ALERTS_INIT = [
-  { id: 1, type: "Low Soil Moisture", nodeId: "NODE-02", value: "18%", threshold: "25%", time: "10:42 AM", severity: "high" },
-  { id: 2, type: "High Temperature", nodeId: "NODE-04", value: "38.2°C", threshold: "35°C", time: "09:15 AM", severity: "medium" },
-  { id: 3, type: "Node Offline", nodeId: "NODE-04", value: "–", threshold: "–", time: "08:50 AM", severity: "high" },
-  { id: 4, type: "Low Battery", nodeId: "NODE-04", value: "41%", threshold: "40%", time: "08:20 AM", severity: "low" },
-  { id: 5, type: "Low Soil Moisture", nodeId: "NODE-01", value: "22%", threshold: "25%", time: "Yesterday", severity: "medium" },
+  { id: 1, type: "low_soil", nodeId: "NODE-02", value: "18%", threshold: "25%", time: "10:42 AM", severity: "high" },
+  { id: 2, type: "high_temp", nodeId: "NODE-04", value: "38.2°C", threshold: "35°C", time: "09:15 AM", severity: "medium" },
+  { id: 3, type: "node_offline", nodeId: "NODE-04", value: "–", threshold: "–", time: "08:50 AM", severity: "high" },
+  { id: 4, type: "low_battery", nodeId: "NODE-04", value: "41%", threshold: "40%", time: "08:20 AM", severity: "low" },
+  { id: 5, type: "low_soil", nodeId: "NODE-01", value: "22%", threshold: "25%", time: "yesterday", severity: "medium" },
 ];
 
 const LOGS_INIT = [
@@ -147,7 +293,7 @@ const Spark = ({ data, color }) => (
 
 // ─── Pages ──────────────────────────────────────────────────────────────────
 
-const PageDashboard = ({ state, dispatch }) => {
+const PageDashboard = ({ state, dispatch, lang }) => {
   const { sensors, pump, lights, nodes } = state;
   const onlineNodes = nodes.filter(n => n.online).length;
 
@@ -156,8 +302,12 @@ const PageDashboard = ({ state, dispatch }) => {
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
-          <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Farm Overview</h1>
-          <p style={{ color: C.textMuted, fontSize: 13, margin: "4px 0 0" }}>Real-time agricultural monitoring · Updated {new Date().toLocaleTimeString()}</p>
+          <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>
+            {t("pages", "farmOverviewTitle", lang)}
+          </h1>
+          <p style={{ color: C.textMuted, fontSize: 13, margin: "4px 0 0" }}>
+            {t("pages", "farmOverviewSubtitle", lang)} · Updated {new Date().toLocaleTimeString()}
+          </p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Badge label={`${onlineNodes}/${nodes.length} NODES ACTIVE`} color={C.green} />
@@ -171,6 +321,9 @@ const PageDashboard = ({ state, dispatch }) => {
           { label: "Pump", value: pump ? "RUNNING" : "IDLE", color: pump ? C.green : C.textMuted },
           { label: "Lights", value: lights ? "ON" : "OFF", color: lights ? C.amber : C.textMuted },
           { label: "Active Nodes", value: `${onlineNodes} / ${nodes.length}`, color: C.blue },
+          { label: "Avg Temp", value: onlineNodes > 0 ? `${sensors.temp.toFixed(1)} °C` : "–", color: C.amber },
+          { label: "Avg Moisture", value: onlineNodes > 0 ? `${sensors.moisture.toFixed(1)} %` : "–", color: C.green },
+          { label: "Avg Humidity", value: onlineNodes > 0 ? `${sensors.humidity.toFixed(1)} %` : "–", color: C.blue },
           { label: "Last Update", value: new Date().toLocaleTimeString(), color: C.textMuted },
         ].map(s => (
           <div key={s.label} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -180,33 +333,90 @@ const PageDashboard = ({ state, dispatch }) => {
         ))}
       </div>
 
-      {/* Sensor Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}>
-        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
-          <div style={{ padding: "16px 18px 8px" }}>
-            <MetricCard icon="temp" label="Temperature" value={sensors.temp.toFixed(1)} unit="°C" color={C.amber} trend={0.4} />
-          </div>
-          <Spark data={state.history.temp} color={C.amber} />
+      {/* Per-Device Sensor Cards */}
+      {nodes.length === 0 ? (
+        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "40px", textAlign: "center", color: C.textMuted }}>
+          No devices registered. Add a device from the Admin panel to see live sensor data here.
         </div>
-        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
-          <div style={{ padding: "16px 18px 8px" }}>
-            <MetricCard icon="moisture" label="Soil Moisture" value={sensors.moisture.toFixed(1)} unit="%" color={C.green} trend={-1.2} />
-          </div>
-          <Spark data={state.history.moisture} color={C.green} />
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
+          {nodes.map(node => {
+            const temp = node.temperature ?? node.temp ?? null;
+            const moisture = node.soil ?? node.moisture ?? null;
+            const humidity = node.humidity ?? null;
+            const rssi = node.rssi ?? node.signal ?? null;
+            const hasData = temp !== null || moisture !== null || humidity !== null;
+
+            return (
+              <div key={node.id} style={{
+                background: C.card,
+                border: `1px solid ${node.online ? C.green + "33" : C.cardBorder}`,
+                borderRadius: 14,
+                padding: "18px 20px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+                position: "relative",
+                overflow: "hidden"
+              }}>
+                {/* Glow when online */}
+                {node.online && <div style={{ position: "absolute", top: -30, right: -30, width: 80, height: 80, background: C.green, filter: "blur(40px)", opacity: 0.06, borderRadius: "50%" }} />}
+
+                {/* Card Header */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: C.green, fontWeight: 800, fontFamily: "monospace", fontSize: 13, letterSpacing: 0.5 }}>{node.id}</div>
+                    <div style={{ color: C.text, fontWeight: 700, fontSize: 15, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{node.name || node.id}</div>
+                    {(node.location_name) && <div style={{ color: C.textSub, fontSize: 11, marginTop: 2 }}>📍 {node.location_name}</div>}
+                  </div>
+                  <StatusDot online={node.online} />
+                </div>
+
+                {/* Sensor Readings */}
+                {hasData ? (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    {temp !== null && (
+                      <div style={{ background: C.surface, borderRadius: 8, padding: "10px 12px" }}>
+                        <div style={{ color: C.textSub, fontSize: 10, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>🌡 Temp</div>
+                        <div style={{ color: parseFloat(temp) > 35 ? C.red : C.amber, fontSize: 20, fontWeight: 800, fontFamily: "monospace" }}>{parseFloat(temp).toFixed(1)}<span style={{ fontSize: 12, fontWeight: 400, color: C.textMuted }}> °C</span></div>
+                      </div>
+                    )}
+                    {moisture !== null && (
+                      <div style={{ background: C.surface, borderRadius: 8, padding: "10px 12px" }}>
+                        <div style={{ color: C.textSub, fontSize: 10, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>💧 Soil</div>
+                        <div style={{ color: parseFloat(moisture) < 25 ? C.red : C.green, fontSize: 20, fontWeight: 800, fontFamily: "monospace" }}>{parseFloat(moisture).toFixed(0)}<span style={{ fontSize: 12, fontWeight: 400, color: C.textMuted }}> %</span></div>
+                      </div>
+                    )}
+                    {humidity !== null && (
+                      <div style={{ background: C.surface, borderRadius: 8, padding: "10px 12px" }}>
+                        <div style={{ color: C.textSub, fontSize: 10, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>🌫 Humidity</div>
+                        <div style={{ color: C.blue, fontSize: 20, fontWeight: 800, fontFamily: "monospace" }}>{parseFloat(humidity).toFixed(1)}<span style={{ fontSize: 12, fontWeight: 400, color: C.textMuted }}> %</span></div>
+                      </div>
+                    )}
+                    {rssi !== null && (
+                      <div style={{ background: C.surface, borderRadius: 8, padding: "10px 12px" }}>
+                        <div style={{ color: C.textSub, fontSize: 10, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>📶 Signal</div>
+                        <div style={{ color: rssi > -80 ? C.green : rssi > -95 ? C.amber : C.red, fontSize: 20, fontWeight: 800, fontFamily: "monospace" }}>{rssi}<span style={{ fontSize: 12, fontWeight: 400, color: C.textMuted }}> dBm</span></div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ background: C.surface, borderRadius: 8, padding: "14px", textAlign: "center", color: C.textSub, fontSize: 12 }}>
+                    {node.online ? "⏳ Waiting for first reading..." : "📴 Device offline — no recent data"}
+                  </div>
+                )}
+
+                {/* Last seen */}
+                {node.last_update && (
+                  <div style={{ color: C.textSub, fontSize: 11, borderTop: `1px solid ${C.cardBorder}`, paddingTop: 10 }}>
+                    Last update: {new Date(node.last_update).toLocaleTimeString()}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
-        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
-          <div style={{ padding: "16px 18px 8px" }}>
-            <MetricCard icon="humidity" label="Humidity" value={sensors.humidity.toFixed(1)} unit="%" color={C.blue} trend={0.8} />
-          </div>
-          <Spark data={state.history.humidity} color={C.blue} />
-        </div>
-        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
-          <div style={{ padding: "16px 18px 8px" }}>
-            <MetricCard icon="light" label="Light Intensity" value={Math.round(sensors.light)} unit="lux" color="#a78bfa" trend={-120} />
-          </div>
-          <Spark data={state.history.light} color="#a78bfa" />
-        </div>
-      </div>
+      )}
 
       {/* Quick Actions */}
       <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "20px 22px" }}>
@@ -223,7 +433,9 @@ const PageDashboard = ({ state, dispatch }) => {
   );
 };
 
-const PageSensors = ({ state }) => {
+
+
+const PageSensors = ({ state, lang }) => {
   const nodeData = useMemo(() => state.nodes.map((n, i) => ({
     ...n,
     temp: n.temperature !== undefined ? n.temperature : (28 + i * 1.3 + Math.random() * 2).toFixed(1),
@@ -235,8 +447,12 @@ const PageSensors = ({ state }) => {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Sensor Nodes</h1>
-      <p style={{ color: C.textMuted, fontSize: 13, margin: "-12px 0 0" }}>Live readings from {state.nodes.length} LoRa sensor nodes across the farm</p>
+      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>
+        {t("pages", "sensorsTitle", lang)}
+      </h1>
+      <p style={{ color: C.textMuted, fontSize: 13, margin: "-12px 0 0" }}>
+        {t("pages", "sensorsSubtitle", lang)} ({state.nodes.length})
+      </p>
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
@@ -269,7 +485,7 @@ const PageSensors = ({ state }) => {
   );
 };
 
-const PageIrrigation = ({ state, dispatch }) => {
+const PageIrrigation = ({ state, dispatch, lang }) => {
   const { autoMode, minMoisture, maxMoisture, pump } = state;
   const [localMin, setLocalMin] = useState(minMoisture);
   const [localMax, setLocalMax] = useState(maxMoisture);
@@ -280,7 +496,9 @@ const PageIrrigation = ({ state, dispatch }) => {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Automatic Irrigation Control</h1>
+      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>
+        {t("pages", "irrigationTitle", lang)}
+      </h1>
 
       {/* Auto Mode Toggle */}
       <div style={{ background: C.card, border: `1px solid ${autoMode ? C.green + "66" : C.cardBorder}`, borderRadius: 12, padding: "20px 22px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
@@ -356,12 +574,14 @@ const PageIrrigation = ({ state, dispatch }) => {
   );
 };
 
-const PagePump = ({ state, dispatch }) => {
+const PagePump = ({ state, dispatch, lang }) => {
   const { pump, lights } = state;
   const runningSince = useMemo(() => new Date(Date.now() - 8 * 60000).toLocaleTimeString(), []);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Pump & Lighting Control</h1>
+      <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>
+        {t("pages", "pumpTitle", lang)}
+      </h1>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, maxWidth: 700 }}>
         {/* Pump */}
         <div style={{ background: C.card, border: `1px solid ${pump ? C.green + "55" : C.cardBorder}`, borderRadius: 14, padding: "28px 24px", display: "flex", flexDirection: "column", gap: 18, alignItems: "center", textAlign: "center" }}>
@@ -415,27 +635,66 @@ const PagePump = ({ state, dispatch }) => {
 
 // PageMap removed in favor of GPSMap component
 
-const PageAlerts = () => {
+const PageAlerts = ({ lang }) => {
   const sevColor = s => s === "high" ? C.red : s === "medium" ? C.amber : C.blue;
+
+  const severityLabel = (severity) => {
+    if (severity === "high") return t("pages", "severityHigh", lang);
+    if (severity === "medium") return t("pages", "severityMedium", lang);
+    if (severity === "low") return t("pages", "severityLow", lang);
+    return severity;
+  };
+
+  const alertTypeLabel = (type) => {
+    if (type === "low_soil") return t("pages", "alertTypeLowSoil", lang);
+    if (type === "high_temp") return t("pages", "alertTypeHighTemp", lang);
+    if (type === "node_offline") return t("pages", "alertTypeNodeOffline", lang);
+    if (type === "low_battery") return t("pages", "alertTypeLowBattery", lang);
+    return type;
+  };
+
+  const timeLabel = (time) => {
+    if (time.toLowerCase() === "yesterday") return t("pages", "timeYesterday", lang);
+    return time;
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
         <div>
-          <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Alerts & Notifications</h1>
-          <p style={{ color: C.textMuted, fontSize: 13, margin: "4px 0 0" }}>System alerts triggered by sensor threshold violations</p>
+          <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>
+            {t("pages", "alertsTitle", lang)}
+          </h1>
+          <p style={{ color: C.textMuted, fontSize: 13, margin: "4px 0 0" }}>
+            {t("pages", "alertsSubtitle", lang)}
+          </p>
         </div>
-        <Badge label={`${ALERTS_INIT.filter(a => a.severity === "high").length} CRITICAL`} color={C.red} />
+        <Badge
+          label={`${ALERTS_INIT.filter(a => a.severity === "high").length} ${t("pages", "alertsCriticalBadge", lang)}`}
+          color={C.red}
+        />
       </div>
       {ALERTS_INIT.map(a => (
         <div key={a.id} style={{ background: C.card, border: `1px solid ${sevColor(a.severity)}33`, borderLeft: `3px solid ${sevColor(a.severity)}`, borderRadius: 10, padding: "14px 18px", display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
           <div style={{ marginTop: 2 }}><Icon name="alerts" size={18} color={sevColor(a.severity)} /></div>
           <div style={{ flex: 1, minWidth: 200 }}>
-            <div style={{ color: sevColor(a.severity), fontWeight: 700, fontSize: 14 }}>{a.type}</div>
-            <div style={{ color: C.textMuted, fontSize: 12, marginTop: 3 }}>Device: <span style={{ color: C.green, fontFamily: "monospace" }}>{a.nodeId}</span> · Value: <span style={{ color: C.text }}>{a.value}</span> · Threshold: <span style={{ color: C.textMuted }}>{a.threshold}</span></div>
+            <div style={{ color: sevColor(a.severity), fontWeight: 700, fontSize: 14 }}>
+              {alertTypeLabel(a.type)}
+            </div>
+            <div style={{ color: C.textMuted, fontSize: 12, marginTop: 3 }}>
+              {t("pages", "labelDevice", lang)}:{" "}
+              <span style={{ color: C.green, fontFamily: "monospace" }}>{a.nodeId}</span>{" "}
+              · {t("pages", "labelValue", lang)}:{" "}
+              <span style={{ color: C.text }}>{a.value}</span>{" "}
+              · {t("pages", "labelThreshold", lang)}:{" "}
+              <span style={{ color: C.textMuted }}>{a.threshold}</span>
+            </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-            <Badge label={a.severity.toUpperCase()} color={sevColor(a.severity)} />
-            <span style={{ color: C.textSub, fontSize: 11, fontFamily: "monospace" }}>{a.time}</span>
+            <Badge label={severityLabel(a.severity)} color={sevColor(a.severity)} />
+            <span style={{ color: C.textSub, fontSize: 11, fontFamily: "monospace" }}>
+              {timeLabel(a.time)}
+            </span>
           </div>
         </div>
       ))}
@@ -443,133 +702,417 @@ const PageAlerts = () => {
   );
 };
 
-const Chart4 = ({ data, color, label, unit }) => (
-  <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "16px 14px" }}>
-    <div style={{ color: C.textMuted, fontSize: 11, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>{label}</div>
-    <ResponsiveContainer width="100%" height={140}>
-      <AreaChart data={data}>
-        <defs><linearGradient id={`cg${color.replace("#", "")}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="5%" stopColor={color} stopOpacity={0.25} />
-          <stop offset="95%" stopColor={color} stopOpacity={0} />
-        </linearGradient></defs>
-        <CartesianGrid stroke={C.cardBorder} strokeDasharray="3 3" />
-        <XAxis dataKey="time" tick={{ fill: C.textSub, fontSize: 10 }} interval={Math.floor(data.length / 4)} />
-        <YAxis tick={{ fill: C.textSub, fontSize: 10 }} />
-        <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 6, color: C.text, fontSize: 12 }} formatter={v => [`${v.toFixed(1)} ${unit}`, label]} />
-        <Area type="monotone" dataKey="value" stroke={color} strokeWidth={2} fill={`url(#cg${color.replace("#", "")})`} dot={false} />
-      </AreaChart>
-    </ResponsiveContainer>
-  </div>
-);
 
-const PageAnalytics = ({ apiFetch, state, demoMode }) => {
+// ─── Device colour palette ───────────────────────────────────────────────────
+const DEVICE_COLORS = ["#4ade80","#60a5fa","#fbbf24","#f87171","#a78bfa","#34d399","#fb923c","#e879f9","#22d3ee","#f9a8d4"];
+
+// ─── Multi-line chart (All Devices) ─────────────────────────────────────────
+const MultiLineChart = ({ allDeviceData, metric, label, unit, deviceNames, colors }) => {
+  // Merge all timestamps across devices
+  const timeSet = new Set();
+  Object.values(allDeviceData).forEach(rows => rows.forEach(r => timeSet.add(r.time)));
+  const sortedTimes = [...timeSet].sort();
+
+  const chartData = sortedTimes.map(t => {
+    const point = { time: t };
+    Object.entries(allDeviceData).forEach(([devId, rows]) => {
+      const match = rows.find(r => r.time === t);
+      if (match && match[metric] !== null && match[metric] !== undefined) {
+        point[devId] = Number(match[metric]);
+      }
+    });
+    return point;
+  });
+
+  // Global min/max/avg for this metric across all devices
+  const allValues = Object.values(allDeviceData)
+    .flatMap(rows => rows.map(r => r[metric]))
+    .filter(v => v !== null && v !== undefined)
+    .map(Number);
+
+  const minVal = allValues.length ? Math.min(...allValues) : null;
+  const maxVal = allValues.length ? Math.max(...allValues) : null;
+  const avgVal = allValues.length ? allValues.reduce((a, b) => a + b, 0) / allValues.length : null;
+
+  const deviceIds = Object.keys(allDeviceData);
+
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "18px 16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div style={{ color: C.textMuted, fontSize: 11, letterSpacing: 1, textTransform: "uppercase", fontWeight: 700 }}>
+          {label} — All Devices
+        </div>
+        {avgVal !== null && (
+          <div style={{ display: "flex", gap: 14, fontSize: 11 }}>
+            <span style={{ color: C.red }}>▼ Min: {minVal.toFixed(1)}{unit}</span>
+            <span style={{ color: C.green }}>Avg: {avgVal.toFixed(1)}{unit}</span>
+            <span style={{ color: C.amber }}>▲ Max: {maxVal.toFixed(1)}{unit}</span>
+          </div>
+        )}
+      </div>
+      <ResponsiveContainer width="100%" height={200}>
+        <LineChart data={chartData} margin={{ top: 4, right: 24, bottom: 4, left: 0 }}>
+          <CartesianGrid stroke={C.cardBorder} strokeDasharray="3 3" />
+          <XAxis dataKey="time" tick={{ fill: C.textSub, fontSize: 10 }} interval={Math.max(1, Math.floor(sortedTimes.length / 6))} />
+          <YAxis tick={{ fill: C.textSub, fontSize: 10 }} unit={unit} width={40} />
+          <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 6, color: C.text, fontSize: 12 }}
+            formatter={(v, key) => [`${Number(v).toFixed(1)} ${unit}`, deviceNames[key] || key]} />
+          <Legend formatter={key => <span style={{ color: C.textMuted, fontSize: 11 }}>{deviceNames[key] || key}</span>} />
+          {deviceIds.map((devId, i) => (
+            <Line key={devId} type="monotone" dataKey={devId} stroke={colors[i % colors.length]}
+              strokeWidth={2} dot={false} connectNulls />
+          ))}
+          {minVal !== null && (
+            <ReferenceLine
+              y={minVal}
+              stroke={C.red}
+              strokeDasharray="4 4"
+              strokeWidth={1.5}
+              label={{ value: `Min ${minVal.toFixed(1)}`, fill: C.red, fontSize: 10, position: "insideTopLeft" }}
+            />
+          )}
+          {maxVal !== null && (
+            <ReferenceLine
+              y={maxVal}
+              stroke={C.amber}
+              strokeDasharray="4 4"
+              strokeWidth={1.5}
+              label={{ value: `Max ${maxVal.toFixed(1)}`, fill: C.amber, fontSize: 10, position: "insideBottomLeft" }}
+            />
+          )}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+};
+
+// ─── Single device chart with min/max lines ──────────────────────────────────
+const SingleDeviceChart = ({ data, metric, label, unit, color }) => {
+  const values = data.map(r => r[metric]).filter(v => v !== null && v !== undefined).map(Number);
+  const minVal = values.length ? Math.min(...values) : null;
+  const maxVal = values.length ? Math.max(...values) : null;
+  const avgVal = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+
+  const chartData = data.map(r => ({
+    time: r.time,
+    value: r[metric] !== null && r[metric] !== undefined ? Number(r[metric]) : null
+  }));
+
+  const gradId = `sdg${color.replace("#", "")}`;
+
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "18px 16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div style={{ color: C.textMuted, fontSize: 11, letterSpacing: 1, textTransform: "uppercase", fontWeight: 700 }}>{label}</div>
+        {avgVal !== null && (
+          <div style={{ display: "flex", gap: 14, fontSize: 11 }}>
+            <span style={{ color: C.red }}>▼ Min: {minVal.toFixed(1)}{unit}</span>
+            <span style={{ color: C.green }}>Avg: {avgVal.toFixed(1)}{unit}</span>
+            <span style={{ color: C.amber }}>▲ Max: {maxVal.toFixed(1)}{unit}</span>
+          </div>
+        )}
+      </div>
+      <ResponsiveContainer width="100%" height={180}>
+        <AreaChart data={chartData} margin={{ top: 10, right: 24, bottom: 4, left: 0 }}>
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={color} stopOpacity={0.25} />
+              <stop offset="95%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke={C.cardBorder} strokeDasharray="3 3" />
+          <XAxis dataKey="time" tick={{ fill: C.textSub, fontSize: 10 }} interval={Math.max(1, Math.floor(chartData.length / 6))} />
+          <YAxis tick={{ fill: C.textSub, fontSize: 10 }} unit={unit} width={40} />
+          <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 6, color: C.text, fontSize: 12 }}
+            formatter={v => v !== null ? [`${Number(v).toFixed(1)} ${unit}`, label] : ["No data", label]} />
+          <Area type="monotone" dataKey="value" stroke={color} strokeWidth={2} fill={`url(#${gradId})`} dot={false} connectNulls />
+          {minVal !== null && (
+            <ReferenceLine y={minVal} stroke={C.red} strokeDasharray="4 4" strokeWidth={1.5}
+              label={{ value: `Min ${minVal.toFixed(1)}`, fill: C.red, fontSize: 10, position: "insideTopLeft" }} />
+          )}
+          {maxVal !== null && (
+            <ReferenceLine y={maxVal} stroke={C.amber} strokeDasharray="4 4" strokeWidth={1.5}
+              label={{ value: `Max ${maxVal.toFixed(1)}`, fill: C.amber, fontSize: 10, position: "insideBottomLeft" }} />
+          )}
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+};
+
+// ─── Analytics Page ──────────────────────────────────────────────────────────
+const PageAnalytics = ({ apiFetch, state, demoMode, selectedDeviceId, lang }) => {
   const [filter, setFilter] = useState("24h");
+  const [selectedDevice, setSelectedDevice] = useState("all"); // "all" or device id
+  const [deviceHistories, setDeviceHistories] = useState({}); // { [devId]: [{time,temp,humidity,moisture,rssi}] }
+  const [loadingCharts, setLoadingCharts] = useState(true);
   const [historyRows, setHistoryRows] = useState([]);
-  const [loadingHistory, setLoadingHistory] = useState(true);
-  
-  const filters = ["1h", "24h", "7d", "30d"];
-  const cnt = { "1h": 12, "24h": 48, "7d": 168, "30d": 720 };
-  const histLen = Math.min(cnt[filter], state.history.temp.length);
+  const [loadingTable, setLoadingTable] = useState(true);
 
-  const tempData = state.history.temp.slice(-histLen);
-  const moistureData = state.history.moisture.slice(-histLen);
-  const humidityData = state.history.humidity.slice(-histLen);
-  const lightData = state.history.light.slice(-histLen);
+  const filters = [
+    { key: "1h",  label: "Last Hour" },
+    { key: "6h",  label: "6 Hours" },
+    { key: "24h", label: "24 Hours" },
+    { key: "7d",  label: "7 Days" },
+    { key: "30d", label: "30 Days" },
+  ];
+
+  const nodes = state.nodes;
+
+  // Stable string key for the set of nodes — only changes when device list actually changes
+  const nodeIdsKey = nodes.map(n => n.id).join(",");
+
+  // Build device name map — only recomputes when the ID list changes
+  const deviceNames = useMemo(() => {
+    const m = {};
+    nodes.forEach(n => { m[n.id] = n.name || n.id; });
+    return m;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeIdsKey]);
+
+  // Stable key for the devices we need to fetch charts for
+  const deviceIdsKey = selectedDevice === "all" ? nodeIdsKey : selectedDevice;
 
   useEffect(() => {
+    if (!selectedDeviceId) return;
+    // Only update if the target device exists in current nodes
+    if (nodes.some(n => n.id === selectedDeviceId)) {
+      setSelectedDevice(selectedDeviceId);
+    }
+  }, [selectedDeviceId, nodes]);
+
+  // Fetch chart data — only when filter/selection/device-list actually changes (NOT every poll)
+  useEffect(() => {
+    const deviceIds = selectedDevice === "all"
+      ? nodeIdsKey.split(",").filter(Boolean)
+      : [selectedDevice];
+
+    if (deviceIds.length === 0 || (deviceIds.length === 1 && !deviceIds[0])) {
+      setLoadingCharts(false);
+      return;
+    }
+
     let active = true;
-    let interval;
-    
-    const fetchData = async () => {
+    // Only show loading spinner on first load; silent refresh after
+    setDeviceHistories(prev => {
+      const hasData = Object.keys(prev).length > 0;
+      if (!hasData) setLoadingCharts(true);
+      return prev;
+    });
+
+    const fetchAll = async () => {
+      try {
+        const results = await Promise.all(
+          deviceIds.map(devId =>
+            apiFetch(`http://localhost:5000/api/history/${devId}?range=${filter}&limit=200`)
+              .then(r => r.ok ? r.json() : [])
+              .catch(() => [])
+          )
+        );
+
+        if (!active) return;
+
+        const histories = {};
+        deviceIds.forEach((devId, i) => {
+          const rows = Array.isArray(results[i]) ? results[i] : [];
+          histories[devId] = rows.map(r => ({
+            time: new Date(r.created_at || r.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            timestamp: new Date(r.created_at || r.time).getTime(),
+            temp: r.temperature != null ? Number(r.temperature) : null,
+            moisture: r.soil != null ? Number(r.soil) : null,
+            humidity: r.humidity != null ? Number(r.humidity) : null,
+            rssi: r.rssi != null ? Number(r.rssi) : null,
+          }));
+        });
+
+        // Demo mode fallback — only used when real data is empty
+        if (demoMode && Object.values(histories).every(h => h.length === 0)) {
+          deviceIds.forEach((devId, idx) => {
+            histories[devId] = Array.from({ length: 30 }, (_, i) => ({
+              time: new Date(Date.now() - (29 - i) * 10 * 60000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+              timestamp: Date.now() - (29 - i) * 10 * 60000,
+              temp: 25 + idx + Math.sin(i / 5) * 4 + Math.random() * 2,
+              moisture: 35 + idx * 5 + Math.cos(i / 4) * 10 + Math.random() * 5,
+              humidity: 55 + idx * 3 + Math.sin(i / 6) * 8 + Math.random() * 3,
+              rssi: -70 - idx * 5 + Math.random() * 10 - 5,
+            }));
+          });
+        }
+
+        setDeviceHistories(histories);
+      } catch (err) {
+        console.error("Failed to load chart data", err);
+      }
+      if (active) setLoadingCharts(false);
+    };
+
+    fetchAll();
+    // Poll charts every 30s to avoid constant loading flash
+    const iv = setInterval(fetchAll, 30000);
+    return () => { active = false; clearInterval(iv); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceIdsKey, filter, demoMode]); // intentionally exclude apiFetch (stable per session)
+
+  // Fetch table rows — uses a stable interval, NOT dependent on nodes object
+  useEffect(() => {
+    let active = true;
+    const fetchTable = async () => {
       try {
         const res = await apiFetch("http://localhost:5000/api/json-data");
-        if (!res.ok) throw new Error("Could not fetch data");
+        if (!res.ok) throw new Error();
         const data = await res.json();
-        
-        if (active) {
-          const allReadings = [];
-          
-          const nodeMap = {};
-          state.nodes.forEach(n => nodeMap[n.id] = n);
-
-          if (data.devices) {
-            Object.keys(data.devices).forEach(devId => {
-               const devName = nodeMap[devId]?.name || devId;
-               const readings = data.devices[devId].readings || [];
-               readings.forEach(r => {
-                 allReadings.push({
-                   date: new Date(r.created_at).toLocaleDateString(),
-                   time: new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-                   timestamp: new Date(r.created_at).getTime(),
-                   node: devName,
-                   temp: r.temperature !== null ? Number(r.temperature).toFixed(1) : "-",
-                   humidity: r.humidity !== null ? Number(r.humidity).toFixed(1) : "-",
-                   moisture: r.soil !== null ? Number(r.soil).toFixed(1) : "-",
-                   light: r.light ?? "-",
-                 });
-               });
+        if (!active) return;
+        const allReadings = [];
+        if (data.devices) {
+          Object.keys(data.devices).forEach(devId => {
+            if (selectedDevice !== "all" && devId !== selectedDevice) return;
+            // Use devId as name fallback (avoid depending on nodes object)
+            const devName = deviceNames[devId] || devId;
+            (data.devices[devId].readings || []).forEach(r => {
+              allReadings.push({
+                date: new Date(r.created_at).toLocaleDateString(),
+                time: new Date(r.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+                timestamp: new Date(r.created_at).getTime(),
+                node: devName,
+                temp: r.temperature != null ? Number(r.temperature).toFixed(1) : "-",
+                humidity: r.humidity != null ? Number(r.humidity).toFixed(1) : "-",
+                moisture: r.soil != null ? Number(r.soil).toFixed(1) : "-",
+              });
+            });
+          });
+        }
+        if (demoMode && allReadings.length === 0) {
+          for (let i = 0; i < 12; i++) {
+            allReadings.push({
+              date: new Date().toLocaleDateString(),
+              time: new Date(Date.now() - i * 15 * 60000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+              timestamp: Date.now() - i * 15 * 60000,
+              node: `Demo Node ${(i % 3) + 1}`,
+              temp: (28 + Math.random() * 5).toFixed(1),
+              humidity: (60 + Math.random() * 15).toFixed(1),
+              moisture: (22 + Math.random() * 20).toFixed(1),
             });
           }
-
-          if (demoMode && allReadings.length === 0) {
-            for (let i = 0; i < 15; i++) {
-              allReadings.push({
-                date: new Date().toLocaleDateString(),
-                time: new Date(Date.now() - i * 15 * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-                timestamp: Date.now() - i * 15 * 60000,
-                node: `Demo Node ${(i % 5) + 1}`,
-                temp: (28 + Math.random() * 5).toFixed(1),
-                humidity: (60 + Math.random() * 15).toFixed(1),
-                moisture: (22 + Math.random() * 20).toFixed(1),
-                light: Math.round(2800 + Math.random() * 1200),
-              });
-            }
-          }
-
-          allReadings.sort((a, b) => b.timestamp - a.timestamp);
-          setHistoryRows(allReadings.slice(0, 15)); // Only show last 15 on Analytics page
-          setLoadingHistory(false);
         }
-      } catch (err) {
-        console.error("Failed to load records", err);
-        if (active) setLoadingHistory(false);
-      }
+        allReadings.sort((a, b) => b.timestamp - a.timestamp);
+        setHistoryRows(allReadings.slice(0, 20));
+      } catch { /* ignore */ }
+      if (active) setLoadingTable(false);
     };
-    
-    fetchData();
-    interval = setInterval(fetchData, 10000);
+    fetchTable();
+    const iv = setInterval(fetchTable, 15000);
+    return () => { active = false; clearInterval(iv); };
+  }, [apiFetch, nodes, selectedDevice, demoMode]);
 
-    return () => { 
-      active = false;
-      clearInterval(interval);
-    };
-  }, [apiFetch, state.nodes, demoMode]);
+  // For "All Devices" multi-line charts
+  const allDeviceData = deviceHistories; // { [devId]: rows }
+
+  // For single device charts
+  const singleDeviceData = selectedDevice !== "all" ? (deviceHistories[selectedDevice] || []) : [];
+
+  const deviceColorMap = useMemo(() => {
+    const m = {};
+    nodes.forEach((n, i) => { m[n.id] = DEVICE_COLORS[i % DEVICE_COLORS.length]; });
+    return m;
+  }, [nodes]);
+
+  const metrics = [
+    { key: "temp",     label: "Temperature",   unit: "°C",  color: C.amber },
+    { key: "moisture", label: "Soil Moisture",  unit: " %", color: C.green },
+    { key: "humidity", label: "Humidity",       unit: " %", color: C.blue },
+    { key: "rssi",     label: "Signal (RSSI)",  unit: " dB", color: "#a78bfa" },
+  ];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+      {/* Header row */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-        <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Analytics</h1>
-        <div style={{ display: "flex", gap: 6 }}>
-          {filters.map(f => (
-            <button key={f} onClick={() => setFilter(f)}
-              style={{ background: filter === f ? C.green + "33" : "transparent", border: `1px solid ${filter === f ? C.green : C.cardBorder}`, borderRadius: 6, padding: "5px 12px", color: filter === f ? C.green : C.textMuted, fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
-              {f === "1h" ? "Last Hour" : f === "24h" ? "24 Hours" : f === "7d" ? "7 Days" : "30 Days"}
-            </button>
-          ))}
+        <div>
+          <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>
+            {t("pages", "analyticsTitle", lang)}
+          </h1>
+          <p style={{ color: C.textMuted, fontSize: 13, margin: "4px 0 0" }}>
+            {selectedDevice === "all"
+              ? `${t("pages", "analyticsAllDevices", lang)} (${nodes.length})`
+              : `Device: ${deviceNames[selectedDevice] || selectedDevice}`}
+          </p>
+        </div>
+
+        {/* Controls row */}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+
+          {/* Device selector dropdown */}
+          <select value={selectedDevice} onChange={e => setSelectedDevice(e.target.value)}
+            style={{ background: C.surface, color: C.green, border: `1.5px solid ${C.green}55`, borderRadius: 8, padding: "7px 14px", fontSize: 13, fontWeight: 700, outline: "none", cursor: "pointer", minWidth: 180 }}>
+            <option value="all">📊 All Devices</option>
+            {nodes.map(n => (
+              <option key={n.id} value={n.id}>🔵 {n.name || n.id}</option>
+            ))}
+          </select>
+
+          {/* Time range */}
+          <div style={{ display: "flex", gap: 4, background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 8, padding: 4 }}>
+            {filters.map(f => (
+              <button key={f.key} onClick={() => setFilter(f.key)}
+                style={{ background: filter === f.key ? C.green + "33" : "transparent", border: filter === f.key ? `1px solid ${C.green}` : "1px solid transparent", borderRadius: 6, padding: "5px 12px", color: filter === f.key ? C.green : C.textMuted, fontSize: 12, cursor: "pointer", fontWeight: 700, transition: "all .15s" }}>
+                {f.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16 }}>
-        <Chart4 data={tempData} color={C.amber} label="Temperature" unit="°C" />
-        <Chart4 data={moistureData} color={C.green} label="Soil Moisture" unit="%" />
-        <Chart4 data={humidityData} color={C.blue} label="Humidity" unit="%" />
-        <Chart4 data={lightData} color="#a78bfa" label="Light Intensity" unit="lux" />
-      </div>
+
+      {/* Charts */}
+      {loadingCharts ? (
+        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "40px", textAlign: "center", color: C.textMuted }}>
+          Loading chart data...
+        </div>
+      ) : nodes.length === 0 ? (
+        <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "40px", textAlign: "center", color: C.textSub }}>
+          No devices found. Add a device in the Admin panel first.
+        </div>
+      ) : selectedDevice === "all" ? (
+        // ── ALL DEVICES: multi-line charts ──
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+            {nodes.map((n, i) => (
+              <div key={n.id} style={{ display: "flex", alignItems: "center", gap: 6, background: C.surface, border: `1px solid ${C.cardBorder}`, borderRadius: 20, padding: "4px 12px", fontSize: 12 }}>
+                <div style={{ width: 10, height: 10, borderRadius: "50%", background: DEVICE_COLORS[i % DEVICE_COLORS.length] }} />
+                <span style={{ color: C.text, fontWeight: 600 }}>{n.name || n.id}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(480px, 1fr))", gap: 16 }}>
+            {metrics.slice(0, 3).map(m => (
+              <MultiLineChart key={m.key}
+                allDeviceData={allDeviceData}
+                metric={m.key} label={m.label} unit={m.unit}
+                deviceNames={deviceNames}
+                colors={nodes.map((_, i) => DEVICE_COLORS[i % DEVICE_COLORS.length])}
+              />
+            ))}
+          </div>
+        </div>
+      ) : (
+        // ── SINGLE DEVICE: individual charts with min/max ──
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(420px, 1fr))", gap: 16 }}>
+          {metrics.map(m => (
+            <SingleDeviceChart key={m.key}
+              data={singleDeviceData}
+              metric={m.key} label={m.label} unit={m.unit} color={m.color}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Recent Read History Table */}
-      <div style={{ marginTop: 10 }}>
-        <h3 style={{ color: C.text, fontSize: 16, fontWeight: 700, margin: "0 0 16px", letterSpacing: 0.5 }}>Recent Read History</h3>
+      <div>
+        <h3 style={{ color: C.text, fontSize: 16, fontWeight: 700, margin: "0 0 14px", letterSpacing: 0.5 }}>
+          Recent Readings {selectedDevice !== "all" && `— ${deviceNames[selectedDevice] || selectedDevice}`}
+        </h3>
         <div style={{ overflowX: "auto", background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12 }}>
-          {loadingHistory ? (
+          {loadingTable ? (
             <div style={{ padding: "30px", textAlign: "center", color: C.textMuted }}>Loading read history...</div>
           ) : historyRows.length === 0 ? (
             <div style={{ padding: "30px", textAlign: "center", color: C.textSub }}>No historical data available</div>
@@ -577,21 +1120,20 @@ const PageAnalytics = ({ apiFetch, state, demoMode }) => {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${C.cardBorder}`, background: C.surface }}>
-                  {["Date", "Time", "Node", "Temp (°C)", "Humidity (%)", "Moisture (%)", "Light (lux)"].map(h => (
+                  {["Date", "Time", "Node", "Temp (°C)", "Humidity (%)", "Moisture (%)"].map(h => (
                     <th key={h} style={{ color: C.textSub, fontSize: 11, letterSpacing: 1, textAlign: "left", padding: "12px 16px", fontWeight: 700, textTransform: "uppercase" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {historyRows.map((r, i) => (
-                  <tr key={i} style={{ borderBottom: i === historyRows.length - 1 ? 'none' : `1px solid ${C.cardBorder}88`, background: i % 2 === 0 ? "transparent" : C.surface + "55" }}>
+                  <tr key={i} style={{ borderBottom: i === historyRows.length - 1 ? "none" : `1px solid ${C.cardBorder}88`, background: i % 2 === 0 ? "transparent" : C.surface + "55" }}>
                     <td style={{ padding: "10px 16px", color: C.text, fontSize: 12 }}>{r.date}</td>
                     <td style={{ padding: "10px 16px", color: C.textMuted, fontFamily: "monospace", fontSize: 11 }}>{r.time}</td>
                     <td style={{ padding: "10px 16px", color: C.green, fontFamily: "monospace", fontWeight: 700 }}>{r.node}</td>
                     <td style={{ padding: "10px 16px", color: C.amber }}>{r.temp}</td>
                     <td style={{ padding: "10px 16px", color: C.blue }}>{r.humidity}</td>
                     <td style={{ padding: "10px 16px", color: C.green }}>{r.moisture}</td>
-                    <td style={{ padding: "10px 16px", color: "#a78bfa" }}>{r.light}</td>
                   </tr>
                 ))}
               </tbody>
@@ -602,6 +1144,8 @@ const PageAnalytics = ({ apiFetch, state, demoMode }) => {
     </div>
   );
 };
+
+
 
 const PageDataLogs = ({ apiFetch, state, demoMode }) => {
   const [rows, setRows] = useState([]);
@@ -933,8 +1477,10 @@ function DashboardLayout({ token, setToken, userRole, apiFetch }) {
   const [page, setPage] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [demoMode, setDemoMode] = useState(false);
+  const [lang, setLang] = useState(localStorage.getItem("lang") || "en");
   const [state, dispatch] = useState(initState());
   const dispatchFn = useCallback((action) => dispatch(prev => reducer(prev, action)), []);
+  const [selectedAnalyticsDevice, setSelectedAnalyticsDevice] = useState(null);
 
   // API Bootstrapping & Polling
   useEffect(() => {
@@ -987,13 +1533,35 @@ function DashboardLayout({ token, setToken, userRole, apiFetch }) {
   const alertCount = state.alerts.filter(a => a.severity === "high").length;
 
   const pageMap = {
-    dashboard: <PageDashboard state={state} dispatch={dispatchFn} />,
-    sensors: <PageSensors state={state} />,
-    irrigation: <PageIrrigation state={state} dispatch={dispatchFn} />,
-    pump: <PagePump state={state} dispatch={dispatchFn} />,
-    map: <GPSMap devices={state.nodes} onDeviceClick={(id) => { }} selectedDevice={null} onDeviceNameClick={(id) => { }} />,
-    alerts: <PageAlerts state={state} />,
-    analytics: <PageAnalytics apiFetch={apiFetch} state={state} demoMode={demoMode} />,
+    dashboard: <PageDashboard state={state} dispatch={dispatchFn} lang={lang} />,
+    sensors: <PageSensors state={state} lang={lang} />,
+    irrigation: <PageIrrigation state={state} dispatch={dispatchFn} lang={lang} />,
+    pump: <PagePump state={state} dispatch={dispatchFn} lang={lang} />,
+    map: (
+      <GPSMap
+        devices={state.nodes}
+        selectedDevice={selectedAnalyticsDevice}
+        lang={lang}
+        onDeviceClick={(id) => {
+          setSelectedAnalyticsDevice(id);
+          setPage("analytics");
+        }}
+        onDeviceNameClick={(id) => {
+          setSelectedAnalyticsDevice(id);
+          setPage("analytics");
+        }}
+      />
+    ),
+    alerts: <PageAlerts state={state} lang={lang} />,
+    analytics: (
+      <PageAnalytics
+        apiFetch={apiFetch}
+        state={state}
+        demoMode={demoMode}
+        selectedDeviceId={selectedAnalyticsDevice}
+        lang={lang}
+      />
+    ),
     logs: <PageDataLogs apiFetch={apiFetch} state={state} demoMode={demoMode} />,
     device: <PageDeviceStatus state={state} />,
     syslog: <PageSystemLogs />,
@@ -1039,7 +1607,11 @@ function DashboardLayout({ token, setToken, userRole, apiFetch }) {
               }}
                 style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: sidebarOpen ? "9px 14px" : "9px 0", justifyContent: sidebarOpen ? "flex-start" : "center", background: active ? C.green + "18" : "none", border: "none", borderLeft: `3px solid ${active ? C.green : "transparent"}`, cursor: "pointer", color: active ? C.green : C.textMuted, fontSize: 13, fontWeight: active ? 700 : 400, transition: "all .15s", position: "relative" }}>
                 <span style={{ flexShrink: 0 }}><Icon name={n.icon} size={16} color={active ? C.green : C.textMuted} /></span>
-                {sidebarOpen && <span style={{ whiteSpace: "nowrap" }}>{n.label}</span>}
+                {sidebarOpen && (
+                  <span style={{ whiteSpace: "nowrap" }}>
+                    {t("nav", n.id, lang)}
+                  </span>
+                )}
                 {n.id === "alerts" && alertCount > 0 && (
                   <span style={{ marginLeft: "auto", background: C.red, color: "#fff", borderRadius: 10, fontSize: 10, fontWeight: 700, padding: "1px 6px", minWidth: 18, textAlign: "center" }}>{alertCount}</span>
                 )}
@@ -1049,12 +1621,39 @@ function DashboardLayout({ token, setToken, userRole, apiFetch }) {
         </nav>
         {/* Footer */}
         {sidebarOpen && (
-          <div style={{ padding: "12px 14px", borderTop: `1px solid ${C.cardBorder}` }}>
-            <div style={{ color: C.textSub, fontSize: 10, letterSpacing: 0.5 }}>v1.0 · LoRa Gateway</div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4 }}>
+          <div style={{ padding: "12px 14px", borderTop: `1px solid ${C.cardBorder}`, display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ color: C.textSub, fontSize: 10, letterSpacing: 0.5 }}>v1.0 · LoRa Gateway</div>
               <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.green, boxShadow: `0 0 5px ${C.green}` }} />
                 <span style={{ color: C.textMuted, fontSize: 10 }}>Gateway Online</span>
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ color: C.textSub, fontSize: 10 }}>Language</span>
+                <select
+                  value={lang}
+                  onChange={e => {
+                    const v = e.target.value;
+                    setLang(v);
+                    localStorage.setItem("lang", v);
+                  }}
+                  style={{
+                    background: C.surface,
+                    border: `1px solid ${C.cardBorder}`,
+                    borderRadius: 4,
+                    padding: "2px 6px",
+                    color: C.text,
+                    fontSize: 10,
+                    outline: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  {LANGUAGE_OPTIONS.map(o => (
+                    <option key={o.code} value={o.code}>{o.label}</option>
+                  ))}
+                </select>
               </div>
               <button
                 onClick={() => setDemoMode(!demoMode)}
@@ -1069,6 +1668,37 @@ function DashboardLayout({ token, setToken, userRole, apiFetch }) {
 
       {/* Main */}
       <main style={{ flex: 1, overflow: "auto", padding: "24px 28px", minWidth: 0 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+          <button
+            onClick={() => setDemoMode(!demoMode)}
+            style={{
+              background: demoMode ? C.amber + "22" : "transparent",
+              color: demoMode ? C.amber : C.textMuted,
+              border: `1px solid ${demoMode ? C.amber + "55" : C.cardBorder}`,
+              borderRadius: 16,
+              padding: "4px 10px",
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: "pointer",
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: demoMode ? C.amber : C.textSub,
+                boxShadow: demoMode ? `0 0 6px ${C.amber}` : "none",
+              }}
+            />
+            {demoMode ? "Demo Mode: ON" : "Demo Mode: OFF"}
+          </button>
+        </div>
         {pageMap[page]}
       </main>
     </div>

@@ -454,6 +454,50 @@ app.get("/api/all-devices-data", authenticateToken, async (req, res) => {
   }
 });
 
+/* ================= DEVICE HISTORY (time-series for Analytics charts) ================= */
+app.get("/api/history/:deviceId", authenticateToken, async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const range = req.query.range || "24h";
+    const limit = Math.min(parseInt(req.query.limit) || 200, 500);
+
+    // Verify the device belongs to this user
+    const [deviceCheck] = await db.query(
+      "SELECT id FROM devices WHERE id = ? AND user_id = ?",
+      [deviceId, req.user.id]
+    );
+    if (deviceCheck.length === 0) {
+      return res.status(404).json({ error: "Device not found" });
+    }
+
+    // Map range to MySQL interval
+    const rangeMap = {
+      "1h":  "1 HOUR",
+      "6h":  "6 HOUR",
+      "24h": "24 HOUR",
+      "7d":  "7 DAY",
+      "30d": "30 DAY"
+    };
+    const interval = rangeMap[range] || "24 HOUR";
+
+    const [rows] = await db.query(`
+      SELECT soil, temperature, humidity, rssi, created_at
+      FROM sensor_data
+      WHERE device_id = ?
+        AND created_at >= NOW() - INTERVAL ${interval}
+      ORDER BY created_at ASC
+      LIMIT ?
+    `, [deviceId, limit]);
+
+    res.json(rows);
+  } catch (error) {
+    console.error("GET /api/history/:deviceId error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+
 /* ================= INSERT DATA (FROM LORA / POSTMAN) ================= */
 app.post("/api/data", async (req, res) => {
   const { device_id, soil, temperature, humidity, rssi, battery } = req.body;
@@ -902,6 +946,37 @@ app.get("/api/admin/devices", authenticateToken, requireAdmin, async (req, res) 
   } catch (error) {
     console.error("Error fetching all devices:", error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Add a device on behalf of any user (admin only)
+app.post("/api/admin/devices", authenticateToken, requireAdmin, async (req, res) => {
+  const { device_id, name, user_id, latitude, longitude, location_name } = req.body;
+
+  if (!device_id || !name || !user_id) {
+    return res.status(400).json({ error: "device_id, name, and user_id are required" });
+  }
+
+  try {
+    // Verify the target user exists
+    const [users] = await db.query("SELECT id FROM users WHERE id = ?", [user_id]);
+    if (users.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    await db.query(
+      `INSERT INTO devices (id, name, user_id, latitude, longitude, location_name, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'offline')`,
+      [device_id, name, user_id, latitude || null, longitude || null, location_name || null]
+    );
+
+    res.json({ success: true, id: device_id, name });
+  } catch (err) {
+    console.error("Error adding device (admin):", err);
+    if (err.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({ error: "A device with that ID already exists" });
+    }
+    res.status(500).json({ error: "Failed to add device" });
   }
 });
 

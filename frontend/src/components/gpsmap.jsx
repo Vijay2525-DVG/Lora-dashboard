@@ -3,6 +3,8 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { C, Icon } from "../App";
 
+const DEVICE_COLORS = ["#4ade80","#60a5fa","#fbbf24","#f87171","#a78bfa","#34d399","#fb923c","#e879f9","#22d3ee","#f9a8d4"];
+
 const Btn = ({ label, onClick, color = C.green, outline, icon, disabled, type = "button", style = {} }) => (
   <button type={type} onClick={onClick} disabled={disabled}
     style={{
@@ -28,7 +30,7 @@ export default function GPSMap({
   onNewLocationPick,
   onDeviceNameClick,
   refreshKey = 0,
-  onDeleteDevice = null
+  onDeleteDevice = null,
 }) {
   const [deviceLocations, setDeviceLocations] = useState({});
   const [nameMap, setNameMap] = useState({});
@@ -121,37 +123,108 @@ export default function GPSMap({
     }
   }, [devices]);
 
+  const deviceColorMap = useMemo(() => {
+    const m = {};
+    devices.forEach((d, i) => {
+      m[d.id] = DEVICE_COLORS[i % DEVICE_COLORS.length];
+    });
+    return m;
+  }, [devices]);
+
   useEffect(() => {
     const m = {};
     devices.forEach(d => { m[d.id] = d.name || d.id; });
     setNameMap(m);
   }, [devices]);
 
+  const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const boundaryRef = useRef(null);
   const tileLayerRef = useRef(null);
 
-  useEffect(() => {
-    if (mapRef.current) {
-      if (tileLayerRef.current) mapRef.current.removeLayer(tileLayerRef.current);
-      tileLayerRef.current = L.tileLayer(mapLayers[mapType].url, { attribution: '' }).addTo(mapRef.current);
-    }
-  }, [mapType, mapLayers]);
+  const createMarkerIcon = (deviceId, status) => {
+    const baseColor = deviceColorMap[deviceId] || "#60a5fa";
+    const isSelected = selectedDevice === deviceId;
+    const outerSize = isSelected ? 26 : 22;
+    const innerSize = isSelected ? 14 : 10;
+    const pulseShadow = status === "online" ? `${baseColor}66` : "#00000055";
+
+    return L.divIcon({
+      className: "",
+      iconSize: [outerSize, outerSize],
+      iconAnchor: [outerSize / 2, outerSize / 2],
+      html: `
+        <div style="
+          width:${outerSize}px;
+          height:${outerSize}px;
+          border-radius:999px;
+          background:rgba(10,15,10,0.9);
+          border:2px solid ${baseColor};
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          box-shadow:0 0 12px ${pulseShadow};
+        ">
+          <div style="
+            width:${innerSize}px;
+            height:${innerSize}px;
+            border-radius:999px;
+            background:${status === "online" ? baseColor : C.textSub};
+          "></div>
+        </div>
+      `
+    });
+  };
 
   useEffect(() => {
-    if (mapRef.current === null) {
-      const initCenter = validLocations.length > 0
-        ? [validLocations[0].latitude, validLocations[0].longitude]
-        : [14.4324, 75.9566];
-      mapRef.current = L.map('leaflet-map', {
-        center: initCenter, zoom: 16, scrollWheelZoom: 'center', doubleClickZoom: true, zoomControl: true, dragging: true, touchZoom: 'center', inertia: true, inertiaDeceleration: 3000, zoomSnap: 0, zoomDelta: 0.25, zoomAnimation: true, easeLinearity: 0.25, attributionControl: false
-      });
-      const tileLayer = L.tileLayer(mapLayers[mapType].url, { attribution: '' });
-      tileLayerRef.current = tileLayer;
-      tileLayer.addTo(mapRef.current);
-    }
+  if (!mapRef.current && mapContainerRef.current) {
+    const initCenter = validLocations.length > 0
+      ? [validLocations[0].latitude, validLocations[0].longitude]
+      : [14.4324, 75.9566];
+    mapRef.current = L.map(mapContainerRef.current, {
+      center: initCenter,
+      zoom: 16,
+      scrollWheelZoom: 'center',
+      doubleClickZoom: true,
+      zoomControl: true,
+      dragging: true,
+      touchZoom: 'center',
+      inertia: true,
+      inertiaDeceleration: 3000,
+      zoomSnap: 0,
+      zoomDelta: 0.25,
+      zoomAnimation: true,
+      easeLinearity: 0.25,
+      attributionControl: false
+    });
+    const tileLayer = L.tileLayer(mapLayers[mapType].url, { attribution: '' });
+    tileLayerRef.current = tileLayer;
+    tileLayer.addTo(mapRef.current);
+    // Ensure proper sizing when first rendered inside flex layout
+    setTimeout(() => {
+      if (mapRef.current) {
+        mapRef.current.invalidateSize();
+      }
+    }, 50);
+  }
+  if (mapRef.current && tileLayerRef.current == null) {
+    const tileLayer = L.tileLayer(mapLayers[mapType].url, { attribution: '' });
+    tileLayerRef.current = tileLayer;
+    tileLayer.addTo(mapRef.current);
+  }
+  }, [validLocations, mapType]);
 
-    if (mapRef.current) {
+  useEffect(() => {
+  if (mapRef.current && tileLayerRef.current) {
+    mapRef.current.removeLayer(tileLayerRef.current);
+    tileLayerRef.current = L.tileLayer(mapLayers[mapType].url, { attribution: '' }).addTo(mapRef.current);
+  }
+  }, [mapType]);
+
+  useEffect(() => {
+  if (!mapRef.current) return;
+
+  if (mapRef.current) {
       if (mapRef.current._markerGroup) {
         mapRef.current._markerGroup.clearLayers();
       } else {
@@ -159,7 +232,8 @@ export default function GPSMap({
       }
 
       validLocations.forEach(loc => {
-        const m = L.marker([loc.latitude, loc.longitude]);
+        const icon = createMarkerIcon(loc.id, loc.status);
+        const m = L.marker([loc.latitude, loc.longitude], { icon });
         m.bindPopup(loc.location_name || loc.id);
         m.on('click', () => onDeviceClick(loc.id));
         mapRef.current._markerGroup.addLayer(m);
@@ -202,7 +276,7 @@ export default function GPSMap({
       mapRef.current.on('click', handler);
       return () => { mapRef.current.off('click', handler); };
     }
-  }, [validLocations, onDeviceClick, pickMode, addPickMode, onNewLocationPick]);
+  }, [validLocations, onDeviceClick, pickMode, addPickMode, onNewLocationPick, createMarkerIcon, selectedDevice]);
 
   useEffect(() => {
     if (mapRef.current && selectedDevice && deviceLocations[selectedDevice] && deviceLocations[selectedDevice].latitude && deviceLocations[selectedDevice].longitude) {
@@ -281,7 +355,9 @@ export default function GPSMap({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, height: "100%" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>Farm Map</h1>
+        <h1 style={{ color: C.text, fontSize: 22, fontWeight: 800, margin: 0, fontFamily: "'Georgia', serif" }}>
+          Farm Map
+        </h1>
 
         <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -313,7 +389,7 @@ export default function GPSMap({
       <div style={{ display: "flex", gap: 20, flex: 1, minHeight: 0 }}>
         {/* Map Container */}
         <div style={{ flex: 2, background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, overflow: "hidden", position: "relative", minHeight: 400 }}>
-          <div id="leaflet-map" style={{ width: "100%", height: "100%" }} />
+        <div ref={mapContainerRef} style={{ width: "100%", height: "100%" }} />
           {(pickMode || addPickMode) && (
             <div style={{ position: "absolute", bottom: 20, left: "50%", transform: "translateX(-50%)", background: C.surface + "ee", backdropFilter: "blur(4px)", padding: "10px 20px", borderRadius: 20, border: `1.5px solid ${C.green}`, color: C.green, fontSize: 14, fontWeight: 700, zIndex: 1000, boxShadow: `0 4px 12px rgba(0,0,0,0.5)`, pointerEvents: "none" }}>
               📍 Click on the map to choose a location
