@@ -150,18 +150,20 @@ export default function AlertPanel({ devices, onClose }) {
     }
   };
 
-  const getAlertIcon = (type) => {
-    switch (type) {
-      case 'soil_low': return '💧';
-      case 'soil_high': return '🌊';
-      case 'temperature_high': return '🌡️';
-      case 'temperature_low': return '❄️';
-      case 'humidity_high': return '💨';
-      case 'humidity_low': return '🏜️';
-      case 'offline': return '📡';
-      default: return '⚠️';
-    }
-  };
+    const getAlertIcon = (type) => {
+      switch (type) {
+        case 'soil_low': return '💧';
+        case 'soil_high': return '🌊';
+        case 'temperature_high': return '🌡️';
+        case 'temperature_low': return '❄️';
+        case 'humidity_high': return '💨';
+        case 'humidity_low': return '🏜️';
+        case 'offline': return '📡';
+        case 'power_outage': return '⚡';
+        case 'irrigation_start': return '🚜';
+        default: return '⚠️';
+      }
+    };
 
   // Get list of devices that have alert configurations
   const configuredDevices = Object.keys(alertSettings);

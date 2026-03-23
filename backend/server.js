@@ -5,6 +5,9 @@ import fs from "fs";
 import path from "path";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import IrrigationScheduler from './scheduler.js';
+import irrigationLogsRouter from './irrigation-logs.js';
+
 
 // secret used to sign JWTs; in production set via environment variable
 const JWT_SECRET = process.env.JWT_SECRET || "supersecret123";
@@ -35,14 +38,14 @@ async function ensureSchema() {
     }
 
     // Create admin user if not exists (password: admin123)
-    const [existingAdmin] = await db.query("SELECT id FROM users WHERE username = 'admin'");
-    if (existingAdmin.length === 0) {
-      const adminHash = await bcrypt.hash('admin123', 10);
+const [existingTestuser] = await db.query("SELECT id FROM users WHERE username = 'testuser'");
+    if (existingTestuser.length === 0) {
+      const adminHash = await bcrypt.hash('admin', 10);
       await db.query(
         "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')",
-        ['admin', adminHash]
+        ['testuser', adminHash]
       );
-      console.log("Admin user created with username: admin");
+      console.log("Admin user 'testuser' (password: admin) created");
     }
 
     // add user_id column to devices if it doesn't exist (MySQL doesn't support ADD COLUMN IF NOT EXISTS on older versions)
@@ -140,6 +143,15 @@ async function ensureSchema() {
 
 // kick off schema check but don't await (server start doesn't depend on it)
 ensureSchema().catch(console.error);
+
+// Initialize irrigation scheduler (global)
+export const scheduler = new IrrigationScheduler();
+scheduler.start();
+
+// Remove broken irrigation-logs mount (optional endpoint)
+console.log("🚜 Irrigation system ready - schedules, AI, power monitoring active");
+
+app.use('/api/irrigation-logs', irrigationLogsRouter);
 
 // JSON file path for storing sensor data
 const DATA_FILE = path.join(process.cwd(), "backend", "sensor_data.json");
@@ -500,7 +512,7 @@ app.get("/api/history/:deviceId", authenticateToken, async (req, res) => {
 
 /* ================= INSERT DATA (FROM LORA / POSTMAN) ================= */
 app.post("/api/data", async (req, res) => {
-  const { device_id, soil, temperature, humidity, rssi, battery } = req.body;
+  const { device_id, soil, temperature, humidity, rssi, battery, voltage, current } = req.body;
 
   const devId = device_id || "NODE_01";
   const soilVal = typeof soil === 'number' ? soil : parseInt(soil) || 0;
@@ -508,13 +520,24 @@ app.post("/api/data", async (req, res) => {
   const humVal = typeof humidity === 'number' ? humidity : parseFloat(humidity) || 0;
   const rssiVal = typeof rssi === 'number' ? rssi : parseInt(rssi) || -100;
   const batteryVal = typeof battery === 'number' ? battery : parseFloat(battery) || null;
+  const voltageVal = typeof voltage === 'number' ? voltage : parseFloat(voltage) || null;
+  const currentVal = typeof current === 'number' ? current : parseFloat(current) || null;
 
   try {
     // Insert sensor data into database
     await db.query(
-      `INSERT INTO sensor_data (device_id, soil, temperature, humidity, rssi, battery)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [devId, soilVal, tempVal, humVal, rssiVal, batteryVal]
+      `INSERT INTO sensor_data (device_id, soil, temperature, humidity, rssi, battery, voltage, current)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [devId, soilVal, tempVal, humVal, rssiVal, batteryVal, voltageVal, currentVal]
+    );
+
+    // Update power status
+    let powerStatus = 'normal';
+    if (voltageVal !== null && voltageVal < 180) powerStatus = 'outage';
+    else if (voltageVal !== null && voltageVal < 200) powerStatus = 'low';
+    await db.query(
+      `UPDATE devices SET status='online', last_seen=NOW(), voltage=?, current=?, power_status=? WHERE id=?`,
+      [voltageVal, currentVal, powerStatus, devId]
     );
 
     // Update device status to online  
@@ -841,6 +864,171 @@ app.get("/api/json-data", authenticateToken, async (req, res) => {
   } catch (err) {
     console.error("Error filtering json-data:", err);
     res.json(data); // fallback
+  }
+});
+
+/* ================= SCHEDULES CRUD ================= */
+app.get("/api/schedules", authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT s.*, d.name as device_name, d.type, l.name as land_name 
+      FROM schedules s 
+      LEFT JOIN devices d ON s.device_id = d.id
+      LEFT JOIN lands l ON s.land_id = l.id
+      WHERE d.user_id = ?
+      ORDER BY s.next_run
+    `, [req.user.id]);
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching schedules:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/schedules", authenticateToken, async (req, res) => {
+  const { device_id, land_id, type, start_time, duration_minutes, repeat_pattern } = req.body;
+  
+  if (!device_id || !type || !start_time || !duration_minutes) {
+    return res.status(400).json({ error: "device_id, type, start_time, duration_minutes required" });
+  }
+
+  try {
+    // Verify device belongs to user and is actuator
+    const [devices] = await db.query(
+      "SELECT id FROM devices WHERE id = ? AND user_id = ? AND type IN ('pump', 'light')",
+      [device_id, req.user.id]
+    );
+    if (devices.length === 0) {
+      return res.status(404).json({ error: "Valid pump/light device not found" });
+    }
+
+    const [result] = await db.query(
+      `INSERT INTO schedules (land_id, device_id, type, start_time, duration_minutes, repeat_pattern, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'active')`,
+      [land_id || null, device_id, type, start_time, duration_minutes, repeat_pattern || 'daily']
+    );
+
+    res.json({ success: true, id: result.insertId });
+  } catch (error) {
+    console.error("Error creating schedule:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put("/api/schedules/:id", authenticateToken, async (req, res) => {
+  const scheduleId = req.params.id;
+  const updates = req.body;
+
+  try {
+    // Verify schedule belongs to user's devices
+    const [schedules] = await db.query(
+      "SELECT s.id FROM schedules s JOIN devices d ON s.device_id = d.id WHERE s.id = ? AND d.user_id = ?",
+      [scheduleId, req.user.id]
+    );
+    if (schedules.length === 0) {
+      return res.status(404).json({ error: "Schedule not found" });
+    }
+
+    const updateFields = [];
+    const values = [];
+    Object.keys(updates).forEach(key => {
+      updateFields.push(`${key} = ?`);
+      values.push(updates[key]);
+    });
+    values.push(scheduleId, req.user.id);
+
+    await db.query(
+      `UPDATE schedules SET ${updateFields.join(', ')}, updated_at = NOW() 
+       WHERE id = ? AND EXISTS (SELECT 1 FROM devices WHERE id = schedules.device_id AND user_id = ?)`,
+      values
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error updating schedule:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/schedules/now", authenticateToken, async (req, res) => {
+  const { device_id, duration, land_id, sequence_id } = req.body;
+  if (!device_id || !duration) return res.status(400).json({ error: 'device_id and duration required' });
+
+  try {
+    const [device] = await db.query("SELECT type FROM devices WHERE id = ? AND user_id = ? AND type IN ('pump', 'light')", [device_id, req.user.id]);
+    if (!device.length) return res.status(404).json({ error: 'Actuator not found' });
+
+    await scheduler.startIrrigationNow(device_id, parseInt(duration), 'manual_now', null, sequence_id);
+    res.json({ success: true, message: `Started ${device_id} for ${duration}min NOW` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/ai-status", authenticateToken, async (req, res) => {
+  try {
+    const [aiDecisions] = await db.query("SELECT * FROM ai_decisions ORDER BY created_at DESC LIMIT 10");
+    const [outages] = await db.query("SELECT * FROM outage_alerts WHERE acknowledged = FALSE ORDER BY created_at DESC LIMIT 5");
+    res.json({ ai_decisions: aiDecisions, outage_alerts: outages });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/schedules/:id", authenticateToken, async (req, res) => {
+  const scheduleId = req.params.id;
+  
+  try {
+    await db.query(
+      `DELETE s FROM schedules s 
+       JOIN devices d ON s.device_id = d.id 
+       WHERE s.id = ? AND d.user_id = ?`,
+      [scheduleId, req.user.id]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting schedule:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/* ================= DEVICE CONTROL ================= */
+app.post("/api/control/:deviceId", authenticateToken, async (req, res) => {
+  const { deviceId } = req.params;
+  const { action } = req.body; // 'on' or 'off'
+
+  if (!['on', 'off'].includes(action)) {
+    return res.status(400).json({ error: "action must be 'on' or 'off'" });
+  }
+
+  try {
+    // Verify device belongs to user and is actuator
+    const [devices] = await db.query(
+      "SELECT type FROM devices WHERE id = ? AND user_id = ? AND type IN ('pump', 'light')",
+      [deviceId, req.user.id]
+    );
+    if (devices.length === 0) {
+      return res.status(404).json({ error: "Actuator device not found" });
+    }
+
+    const status = action === 'on' ? 'running' : 'idle';
+    await db.query(
+      `UPDATE devices SET status = ? WHERE id = ?`,
+      [status, deviceId]
+    );
+
+    // Log manual irrigation
+    if (action === 'on' && devices[0].type === 'pump') {
+      await db.query(
+        `INSERT INTO irrigation_logs (device_id, action, reason) VALUES (?, 'start', 'manual')`,
+        [deviceId]
+      );
+    }
+
+    res.json({ success: true, status });
+  } catch (error) {
+    console.error("Error controlling device:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 

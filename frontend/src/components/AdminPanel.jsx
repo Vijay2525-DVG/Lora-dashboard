@@ -167,6 +167,7 @@ export default function AdminPanel({ onClose, token, apiFetch }) {
         <button className={`admin-tab ${activeTab === "config" ? "active" : ""}`} onClick={() => setActiveTab("config")}>User Config</button>
         <button className={`admin-tab ${activeTab === "sensors" ? "active" : ""}`} onClick={() => setActiveTab("sensors")}>Sensors</button>
         <button className={`admin-tab ${activeTab === "alerts" ? "active" : ""}`} onClick={() => setActiveTab("alerts")}>Alerts ({alerts.length})</button>
+        <button className={`admin-tab ${activeTab === "irrigation" ? "active" : ""}`} onClick={() => setActiveTab("irrigation")}>Irrigation</button>
       </div>
       <div className="admin-content">
         {error && <div className="admin-error">{error}</div>}
@@ -337,7 +338,7 @@ export default function AdminPanel({ onClose, token, apiFetch }) {
           </div>
         )}
 
-        {activeTab === "alerts" && (
+{activeTab === "alerts" && (
           <div className="admin-alerts">
             {alerts.length === 0 ? <div className="no-alerts">No active alerts</div> : (
               <table className="admin-table">
@@ -355,6 +356,11 @@ export default function AdminPanel({ onClose, token, apiFetch }) {
                 </tbody>
               </table>
             )}
+          </div>
+        )}
+        {activeTab === "irrigation" && (
+          <div className="admin-irrigation">
+<IrrigationScheduler token={token} apiFetch={apiFetch} />
           </div>
         )}
       </div>

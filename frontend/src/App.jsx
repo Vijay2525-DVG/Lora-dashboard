@@ -5,6 +5,7 @@ import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
 import Admin from "./pages/Admin";
 import Landing from "./components/Landing";
 import GPSMap from "./components/gpsmap";
+import IrrigationScheduler from "./components/IrrigationScheduler.jsx";
 
 // ─── Palette & Theme ───────────────────────────────────────────────────────
 export const C = {
